@@ -506,26 +506,56 @@ export function createMobileControls(onChange: (state: MobileControlState) => vo
   const wrapper = document.createElement("div");
   wrapper.style.cssText = `
     position: absolute; inset: 0; display: flex; justify-content: space-between;
-    align-items: flex-end; gap: 14px; padding: 14px; box-sizing: border-box;
+    align-items: flex-end; gap: 12px; padding: 12px; box-sizing: border-box;
     pointer-events: auto;
   `;
   container.appendChild(wrapper);
 
-  const steeringPad = document.createElement("div");
-  steeringPad.style.cssText = `
-    width: min(44vw, 260px); height: min(44vw, 260px);
-    background: rgba(20, 20, 40, 0.88); border: 3px solid #fff;
-    border-radius: 28px; position: relative; touch-action: none;
+  const steeringCard = document.createElement("div");
+  steeringCard.style.cssText = `
+    width: min(34vw, 210px); min-width: 180px; height: min(34vw, 210px);
+    background: rgba(11, 16, 30, 0.82); backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 32px;
+    box-shadow: 0 22px 44px rgba(0,0,0,0.35);
+    position: relative; overflow: hidden; touch-action: none;
     display: flex; align-items: center; justify-content: center;
   `;
-  steeringPad.innerHTML = `<div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#fff; font-size:12px; text-align:center; padding:12px; user-select:none;">Toque e arraste aqui para virar</div>`;
+
+  const steeringPad = document.createElement("div");
+  steeringPad.style.cssText = `
+    width: 88%; height: 88%; border-radius: 50%;
+    background: radial-gradient(circle at 50% 40%, rgba(255,255,255,0.18), transparent 34%),
+      radial-gradient(circle at 50% 50%, rgba(255,255,255,0.06), transparent 62%),
+      linear-gradient(180deg, rgba(15, 24, 45, 0.94), rgba(10, 14, 24, 0.96));
+    border: 2px solid rgba(255,255,255,0.2);
+    position: relative; display: flex; align-items: center; justify-content: center;
+  `;
+  steeringCard.appendChild(steeringPad);
+
+  const ring = document.createElement("div");
+  ring.style.cssText = `
+    position: absolute; inset: 12px; border: 1px dashed rgba(255,255,255,0.14);
+    border-radius: 50%; pointer-events: none;
+  `;
+  steeringPad.appendChild(ring);
 
   const steerIndicator = document.createElement("div");
   steerIndicator.style.cssText = `
-    position: absolute; width: 24px; height: 24px; background: #ff3b3b;
-    border: 2px solid #fff; border-radius: 50%; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    position: absolute; width: 16px; height: 16px; background: #ffd86a;
+    border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 0 10px rgba(255,216,106,0.08);
+    left: 50%; top: 50%; transform: translate(-50%, -50%);
+    transition: left 0.08s ease-out;
   `;
   steeringPad.appendChild(steerIndicator);
+
+  const steeringHint = document.createElement("div");
+  steeringHint.textContent = "DIRIJA";
+  steeringHint.style.cssText = `
+    position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+    color: rgba(255,255,255,0.82); font-size: 11.5px; letter-spacing: 1px;
+    text-transform: uppercase; pointer-events: none;
+  `;
+  steeringPad.appendChild(steeringHint);
 
   let steeringActive = false;
 
@@ -537,8 +567,8 @@ export function createMobileControls(onChange: (state: MobileControlState) => vo
   function updateSteerFromEvent(event: PointerEvent) {
     const rect = steeringPad.getBoundingClientRect();
     const x = event.clientX - (rect.left + rect.width / 2);
-    const steer = Math.max(-1, Math.min(1, x / (rect.width * 0.5)));
-    steerIndicator.style.left = `${50 + steer * 40}%`;
+    const steer = Math.max(-1, Math.min(1, x / (rect.width * 0.42)));
+    steerIndicator.style.left = `${50 + steer * 36}%`;
     commitState({ steer });
   }
 
@@ -567,24 +597,38 @@ export function createMobileControls(onChange: (state: MobileControlState) => vo
 
   const rightPanel = document.createElement("div");
   rightPanel.style.cssText = `
-    display: grid; grid-template-columns: repeat(2, minmax(80px, 96px)); gap: 12px;
-    align-items: end;
+    display: flex; gap: 10px; align-items: center; justify-content: flex-end;
+    width: min(34vw, 190px); min-width: 160px;
   `;
 
-  function createActionButton(label: string, color: string) {
+  function createActionButton(icon: string, color: string, accent: string) {
     const button = document.createElement("div");
-    button.textContent = label;
+    button.textContent = icon;
     button.style.cssText = `
-      background: ${color}; color: #fff; border: 3px solid #fff;
-      border-radius: 20px; padding: 18px 14px; text-align: center;
-      font-family: ${RETRO_FONT}; font-size: 18px; font-weight: 700;
-      letter-spacing: 1px; user-select: none; touch-action: none;
+      width: 76px; height: 76px; display: inline-flex; align-items: center;
+      justify-content: center; background: linear-gradient(180deg, ${accent} 0%, ${color} 100%);
+      color: #fff; border: 1px solid rgba(255,255,255,0.22); border-radius: 50%;
+      font-family: ${RETRO_FONT}; font-size: 32px; font-weight: 800;
+      box-shadow: 0 16px 28px rgba(0,0,0,0.24); user-select: none;
+      touch-action: none; transition: transform 0.15s ease, box-shadow 0.15s ease;
     `;
+    button.addEventListener("pointerdown", () => {
+      button.style.transform = "translateY(1px) scale(0.98)";
+      button.style.boxShadow = "0 8px 16px rgba(0,0,0,0.2)";
+    });
+    button.addEventListener("pointerup", () => {
+      button.style.transform = "translateY(0) scale(1)";
+      button.style.boxShadow = "0 16px 28px rgba(0,0,0,0.24)";
+    });
+    button.addEventListener("pointercancel", () => {
+      button.style.transform = "translateY(0) scale(1)";
+      button.style.boxShadow = "0 16px 28px rgba(0,0,0,0.24)";
+    });
     return button;
   }
 
-  const throttleButton = createActionButton("ACELERAR", "#1f8f3d");
-  const brakeButton = createActionButton("FREAR", "#d4342c");
+  const throttleButton = createActionButton("▲", "#27b84b", "#5ae186");
+  const brakeButton = createActionButton("▼", "#e24444", "#ff6f6f");
 
   function bindToggle(button: HTMLDivElement, key: keyof MobileControlState) {
     button.addEventListener("pointerdown", (event) => {
@@ -595,6 +639,8 @@ export function createMobileControls(onChange: (state: MobileControlState) => vo
     const release = (event: PointerEvent) => {
       event.preventDefault();
       commitState({ [key]: false } as Partial<MobileControlState>);
+      button.style.transform = "translateY(0) scale(1)";
+      button.style.boxShadow = "0 14px 26px rgba(0,0,0,0.22)";
     };
     button.addEventListener("pointerup", release);
     button.addEventListener("pointercancel", release);
@@ -606,7 +652,7 @@ export function createMobileControls(onChange: (state: MobileControlState) => vo
 
   rightPanel.appendChild(throttleButton);
   rightPanel.appendChild(brakeButton);
-  wrapper.appendChild(steeringPad);
+  wrapper.appendChild(steeringCard);
   wrapper.appendChild(rightPanel);
   document.body.appendChild(container);
   return { destroy: () => container.remove() };
