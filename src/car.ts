@@ -1,0 +1,219 @@
+import * as THREE from "three";
+import { elevationAt } from "./track";
+
+export function createCarMesh(): THREE.Group {
+  const group = new THREE.Group();
+
+  const bodyMaterial = new THREE.MeshStandardMaterial({
+    color: 0xd4342c,
+    metalness: 0.5,
+    roughness: 0.35,
+  });
+
+  // chassi principal (mais baixo e largo)
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.45, 3.8), bodyMaterial);
+  body.position.y = 0.42;
+  body.castShadow = true;
+  group.add(body);
+
+  // capô inclinado (frente afunilada)
+  const hood = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.35, 1.1), bodyMaterial);
+  hood.position.set(0, 0.55, 1.55);
+  hood.rotation.x = -0.18;
+  hood.castShadow = true;
+  group.add(hood);
+
+  // cabine
+  const cabinMaterial = new THREE.MeshStandardMaterial({
+    color: 0x161616,
+    metalness: 0.3,
+    roughness: 0.5,
+  });
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.55, 1.7), cabinMaterial);
+  cabin.position.set(0, 0.85, -0.35);
+  cabin.castShadow = true;
+  group.add(cabin);
+
+  // para-brisa inclinado
+  const windshield = new THREE.Mesh(
+    new THREE.BoxGeometry(1.3, 0.5, 0.12),
+    new THREE.MeshStandardMaterial({ color: 0x88ccee, metalness: 0.2, roughness: 0.1, transparent: true, opacity: 0.6 })
+  );
+  windshield.position.set(0, 0.85, 0.5);
+  windshield.rotation.x = -0.5;
+  group.add(windshield);
+
+  // aerofólio traseiro
+  const spoilerMaterial = new THREE.MeshStandardMaterial({ color: 0x161616, metalness: 0.3, roughness: 0.5 });
+  const spoilerWing = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.08, 0.4), spoilerMaterial);
+  spoilerWing.position.set(0, 0.95, -1.85);
+  group.add(spoilerWing);
+  for (const side of [-0.7, 0.7]) {
+    const strut = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.35, 0.08), spoilerMaterial);
+    strut.position.set(side, 0.75, -1.85);
+    group.add(strut);
+  }
+
+  // faróis
+  const headlightMaterial = new THREE.MeshStandardMaterial({
+    color: 0xffffee,
+    emissive: 0xffffaa,
+    emissiveIntensity: 0.8,
+  });
+  for (const side of [-0.7, 0.7]) {
+    const headlight = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.15, 0.1), headlightMaterial);
+    headlight.position.set(side, 0.5, 1.95);
+    group.add(headlight);
+  }
+
+  // lanternas traseiras
+  const taillightMaterial = new THREE.MeshStandardMaterial({
+    color: 0xff3333,
+    emissive: 0xaa0000,
+    emissiveIntensity: 0.7,
+  });
+  for (const side of [-0.75, 0.75]) {
+    const taillight = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.15, 0.08), taillightMaterial);
+    taillight.position.set(side, 0.5, -1.92);
+    group.add(taillight);
+  }
+
+  // rodas (pneu + roda)
+  const tireMaterial = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.8 });
+  const rimMaterial = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8, roughness: 0.3 });
+  const wheelOffsets: [number, number, number][] = [
+    [-0.95, 0.36, 1.15],
+    [0.95, 0.36, 1.15],
+    [-0.95, 0.36, -1.15],
+    [0.95, 0.36, -1.15],
+  ];
+  for (const [x, y, z] of wheelOffsets) {
+    const tire = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.28, 16), tireMaterial);
+    tire.rotation.z = Math.PI / 2;
+    tire.position.set(x, y, z);
+    tire.castShadow = true;
+    group.add(tire);
+
+    const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.3, 8), rimMaterial);
+    rim.rotation.z = Math.PI / 2;
+    rim.position.set(x, y, z);
+    group.add(rim);
+  }
+
+  return group;
+}
+
+export class CarController {
+  mesh: THREE.Group;
+  speed = 0;
+  heading = 0;
+  /** velocidade lateral de empurrão (bump), independente da velocidade de condução */
+  bumpVelocity = new THREE.Vector2(0, 0);
+
+  readonly maxSpeed = 28;
+  readonly maxReverseSpeed = -10;
+  readonly acceleration = 14;
+  readonly brakeDeceleration = 24;
+  readonly friction = 6;
+  readonly turnSpeed = 2.2;
+
+  constructor(mesh: THREE.Group) {
+    this.mesh = mesh;
+  }
+
+  update(dt: number, input: { throttle: number; brake: number; steer: number }) {
+    if (input.throttle > 0) {
+      this.speed += this.acceleration * input.throttle * dt;
+    } else if (input.brake > 0) {
+      this.speed -= this.brakeDeceleration * dt;
+    } else {
+      const decel = this.friction * dt;
+      if (this.speed > 0) this.speed = Math.max(0, this.speed - decel);
+      else if (this.speed < 0) this.speed = Math.min(0, this.speed + decel);
+    }
+
+    this.speed = THREE.MathUtils.clamp(this.speed, this.maxReverseSpeed, this.maxSpeed);
+
+    if (Math.abs(this.speed) > 0.1) {
+      const speedFactor = this.speed / this.maxSpeed;
+      const direction = this.speed >= 0 ? 1 : -1;
+      this.heading -= input.steer * this.turnSpeed * dt * direction * Math.min(1, Math.abs(speedFactor) + 0.3);
+    }
+
+    this.mesh.position.x += Math.sin(this.heading) * this.speed * dt + this.bumpVelocity.x * dt;
+    this.mesh.position.z += Math.cos(this.heading) * this.speed * dt + this.bumpVelocity.y * dt;
+    this.mesh.position.y = elevationAt(this.mesh.position.x, this.mesh.position.z);
+    this.mesh.rotation.y = this.heading;
+
+    // o empurrão de colisão decai rápido, tipo bumper car
+    const decayFactor = Math.pow(0.02, dt);
+    this.bumpVelocity.multiplyScalar(decayFactor);
+  }
+}
+
+function normalizeAngle(angle: number): number {
+  let a = angle % (Math.PI * 2);
+  if (a > Math.PI) a -= Math.PI * 2;
+  if (a < -Math.PI) a += Math.PI * 2;
+  return a;
+}
+
+export class AICarController extends CarController {
+  private waypoints: THREE.Vector3[];
+  private targetIndex: number;
+  readonly cruiseThrottle: number;
+
+  private stuckTimer = 0;
+  private reverseTimer = 0;
+  private lastReverseSteer = 0;
+
+  constructor(mesh: THREE.Group, waypoints: THREE.Vector3[], startIndex: number, cruiseThrottle = 0.85) {
+    super(mesh);
+    this.waypoints = waypoints;
+    this.targetIndex = startIndex;
+    this.cruiseThrottle = cruiseThrottle;
+  }
+
+  updateAI(dt: number) {
+    const target = this.waypoints[this.targetIndex];
+    const dx = target.x - this.mesh.position.x;
+    const dz = target.z - this.mesh.position.z;
+    const distance = Math.hypot(dx, dz);
+
+    if (distance < 8) {
+      this.targetIndex = (this.targetIndex + 1) % this.waypoints.length;
+    }
+
+    const desiredHeading = Math.atan2(dx, dz);
+    const angleDiff = normalizeAngle(desiredHeading - this.heading);
+    const steer = THREE.MathUtils.clamp(-angleDiff * 2, -1, 1);
+    const sharpTurn = Math.abs(angleDiff) > 0.5;
+
+    // se está travado (colidiu com carro/obstáculo e não sai do lugar), engata a ré
+    if (this.reverseTimer > 0) {
+      this.reverseTimer -= dt;
+      this.update(dt, { throttle: 0, brake: 1, steer: this.lastReverseSteer });
+      return;
+    }
+
+    this.update(dt, {
+      throttle: sharpTurn ? this.cruiseThrottle * 0.65 : this.cruiseThrottle,
+      brake: 0,
+      steer,
+    });
+
+    const topSpeed = this.maxSpeed * (sharpTurn ? this.cruiseThrottle * 0.65 : this.cruiseThrottle);
+    if (this.speed > topSpeed) this.speed = topSpeed;
+
+    if (Math.abs(this.speed) < 2) {
+      this.stuckTimer += dt;
+      if (this.stuckTimer > 0.8) {
+        this.reverseTimer = 1 + Math.random() * 0.5;
+        this.lastReverseSteer = steer >= 0 ? -1 : 1;
+        this.stuckTimer = 0;
+      }
+    } else {
+      this.stuckTimer = 0;
+    }
+  }
+}
