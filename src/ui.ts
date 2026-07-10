@@ -395,6 +395,12 @@ export function createVictoryOverlay(onRestart: () => void) {
 const PLAYER_NAME_STORAGE_KEY = "topGearTest.playerName";
 const DEFAULT_PLAYER_NAME = "JOGADOR";
 
+export interface MobileControlState {
+  throttle: boolean;
+  brake: boolean;
+  steer: number;
+}
+
 export function createNameEntryScreen(onStart: (name: string) => void) {
   const savedName = localStorage.getItem(PLAYER_NAME_STORAGE_KEY) ?? "";
 
@@ -487,4 +493,121 @@ export function createNameEntryScreen(onStart: (name: string) => void) {
   document.body.appendChild(el);
 
   window.setTimeout(() => input.focus(), 0);
+}
+
+export function createMobileControls(onChange: (state: MobileControlState) => void) {
+  const state: MobileControlState = { throttle: false, brake: false, steer: 0 };
+
+  const container = document.createElement("div");
+  container.style.cssText = `
+    position: fixed; inset: 0; z-index: 22; pointer-events: none;
+  `;
+
+  const wrapper = document.createElement("div");
+  wrapper.style.cssText = `
+    position: absolute; inset: 0; display: flex; justify-content: space-between;
+    align-items: flex-end; gap: 14px; padding: 14px; box-sizing: border-box;
+    pointer-events: auto;
+  `;
+  container.appendChild(wrapper);
+
+  const steeringPad = document.createElement("div");
+  steeringPad.style.cssText = `
+    width: min(44vw, 260px); height: min(44vw, 260px);
+    background: rgba(20, 20, 40, 0.88); border: 3px solid #fff;
+    border-radius: 28px; position: relative; touch-action: none;
+    display: flex; align-items: center; justify-content: center;
+  `;
+  steeringPad.innerHTML = `<div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#fff; font-size:12px; text-align:center; padding:12px; user-select:none;">Toque e arraste aqui para virar</div>`;
+
+  const steerIndicator = document.createElement("div");
+  steerIndicator.style.cssText = `
+    position: absolute; width: 24px; height: 24px; background: #ff3b3b;
+    border: 2px solid #fff; border-radius: 50%; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  `;
+  steeringPad.appendChild(steerIndicator);
+
+  let steeringActive = false;
+
+  function commitState(newState: Partial<MobileControlState>) {
+    Object.assign(state, newState);
+    onChange(state);
+  }
+
+  function updateSteerFromEvent(event: PointerEvent) {
+    const rect = steeringPad.getBoundingClientRect();
+    const x = event.clientX - (rect.left + rect.width / 2);
+    const steer = Math.max(-1, Math.min(1, x / (rect.width * 0.5)));
+    steerIndicator.style.left = `${50 + steer * 40}%`;
+    commitState({ steer });
+  }
+
+  steeringPad.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    steeringPad.setPointerCapture(event.pointerId);
+    steeringActive = true;
+    updateSteerFromEvent(event);
+  });
+
+  steeringPad.addEventListener("pointermove", (event) => {
+    if (!steeringActive) return;
+    event.preventDefault();
+    updateSteerFromEvent(event);
+  });
+
+  const resetSteer = () => {
+    steeringActive = false;
+    steerIndicator.style.left = "50%";
+    commitState({ steer: 0 });
+  };
+
+  steeringPad.addEventListener("pointerup", resetSteer);
+  steeringPad.addEventListener("pointercancel", resetSteer);
+  steeringPad.addEventListener("pointerleave", resetSteer);
+
+  const rightPanel = document.createElement("div");
+  rightPanel.style.cssText = `
+    display: grid; grid-template-columns: repeat(2, minmax(80px, 96px)); gap: 12px;
+    align-items: end;
+  `;
+
+  function createActionButton(label: string, color: string) {
+    const button = document.createElement("div");
+    button.textContent = label;
+    button.style.cssText = `
+      background: ${color}; color: #fff; border: 3px solid #fff;
+      border-radius: 20px; padding: 18px 14px; text-align: center;
+      font-family: ${RETRO_FONT}; font-size: 18px; font-weight: 700;
+      letter-spacing: 1px; user-select: none; touch-action: none;
+    `;
+    return button;
+  }
+
+  const throttleButton = createActionButton("ACELERAR", "#1f8f3d");
+  const brakeButton = createActionButton("FREAR", "#d4342c");
+
+  function bindToggle(button: HTMLDivElement, key: keyof MobileControlState) {
+    button.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      button.setPointerCapture(event.pointerId);
+      commitState({ [key]: true } as Partial<MobileControlState>);
+    });
+    const release = (event: PointerEvent) => {
+      event.preventDefault();
+      commitState({ [key]: false } as Partial<MobileControlState>);
+    };
+    button.addEventListener("pointerup", release);
+    button.addEventListener("pointercancel", release);
+    button.addEventListener("pointerleave", release);
+  }
+
+  bindToggle(throttleButton, "throttle");
+  bindToggle(brakeButton, "brake");
+
+  rightPanel.appendChild(throttleButton);
+  rightPanel.appendChild(brakeButton);
+  wrapper.appendChild(steeringPad);
+  wrapper.appendChild(rightPanel);
+  document.body.appendChild(container);
+  return { destroy: () => container.remove() };
 }

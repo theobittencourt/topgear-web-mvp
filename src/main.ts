@@ -12,6 +12,7 @@ import {
   createVictoryOverlay,
   createNameEntryScreen,
   createMinimap,
+  createMobileControls,
   createPositionBadge,
 } from "./ui";
 
@@ -135,6 +136,17 @@ const racers: Racer[] = [
 const allCars: CarController[] = racers.map((r) => r.controller);
 
 const keys = { w: false, a: false, s: false, d: false };
+const mobileInput = { throttle: false, brake: false, steer: 0 };
+const isMobileDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+
+if (isMobileDevice) {
+  createMobileControls((state) => {
+    mobileInput.throttle = state.throttle;
+    mobileInput.brake = state.brake;
+    mobileInput.steer = state.steer;
+  });
+}
+
 window.addEventListener("keydown", (e) => setKey(e.key, true));
 window.addEventListener("keyup", (e) => setKey(e.key, false));
 
@@ -181,10 +193,11 @@ function animate() {
     let steer = 0;
     if (keys.a) steer += 1;
     if (keys.d) steer -= 1;
+    if (mobileInput.steer !== 0) steer = mobileInput.steer;
 
     car.update(dt, {
-      throttle: keys.w ? 1 : 0,
-      brake: keys.s ? 1 : 0,
+      throttle: keys.w || mobileInput.throttle ? 1 : 0,
+      brake: keys.s || mobileInput.brake ? 1 : 0,
       steer,
     });
 
