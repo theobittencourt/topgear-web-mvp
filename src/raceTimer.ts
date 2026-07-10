@@ -61,9 +61,11 @@ export class RaceProgress {
   }
 }
 
+/** Formato clássico de jogo de corrida SNES: MM'SS"CC (minutos, segundos, centésimos). */
 export function formatTime(ms: number): string {
-  const totalSeconds = ms / 1000;
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = (totalSeconds % 60).toFixed(2).padStart(5, "0");
-  return `${minutes}:${seconds}`;
+  const totalCentis = Math.floor(ms / 10);
+  const minutes = Math.floor(totalCentis / 6000);
+  const seconds = Math.floor((totalCentis % 6000) / 100);
+  const centis = totalCentis % 100;
+  return `${minutes}'${String(seconds).padStart(2, "0")}"${String(centis).padStart(2, "0")}`;
 }

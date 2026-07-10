@@ -11,6 +11,8 @@ import {
   createCountdownOverlay,
   createVictoryOverlay,
   createNameEntryScreen,
+  createMinimap,
+  createPositionBadge,
 } from "./ui";
 
 const TOTAL_LAPS = 3;
@@ -141,9 +143,11 @@ function setKey(key: string, value: boolean) {
   if (k === "w" || k === "a" || k === "s" || k === "d") keys[k] = value;
 }
 
-const speedHud = createSpeedHud();
+const speedHud = createSpeedHud(car.maxSpeed * 6);
 const lapHud = createLapHud();
 const leaderboardHud = createLeaderboardHud();
+const minimap = createMinimap(waypoints);
+const positionBadge = createPositionBadge();
 const lapBanner = createLapBanner();
 const countdownOverlay = createCountdownOverlay();
 const victoryOverlay = createVictoryOverlay(() => window.location.reload());
@@ -228,15 +232,18 @@ function animate() {
     }
   }
 
-  speedHud.update(Math.abs(car.speed) * 6);
+  speedHud.update(
+    Math.abs(car.speed) * 6,
+    raceStarted ? formatTime(playerRacer.progress.currentLapElapsed()) : "0'00\"00"
+  );
   lapHud.update(
     playerRacer.progress.lapCount,
     TOTAL_LAPS,
-    raceStarted ? playerRacer.progress.currentLapElapsed() : 0,
     playerRacer.progress.lastLapTime,
     playerRacer.progress.bestLapTime,
     formatTime
   );
+  const sortedRacers = [...racers].sort((a, b) => b.progress.score() - a.progress.score());
   leaderboardHud.update(
     racers.map((r) => ({
       label: r.label,
@@ -244,6 +251,16 @@ function animate() {
       isPlayer: r.isPlayer,
       lapCount: r.progress.lapCount,
       score: r.progress.score(),
+    }))
+  );
+  positionBadge.update(sortedRacers.indexOf(playerRacer) + 1);
+  minimap.update(
+    racers.map((r, i) => ({
+      id: String(i),
+      x: r.controller.mesh.position.x,
+      z: r.controller.mesh.position.z,
+      color: r.color,
+      isPlayer: r.isPlayer,
     }))
   );
 

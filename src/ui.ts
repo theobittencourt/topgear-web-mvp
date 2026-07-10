@@ -32,28 +32,62 @@ function ordinal(n: number): string {
   return `${n}º`;
 }
 
-export function createSpeedHud() {
+const TACHO_SEGMENTS = 20;
+
+/** Velocímetro estilo LCD vermelho com barra de tacômetro diagonal, tipo painel de corrida SNES. */
+export function createSpeedHud(maxSpeedKmh: number) {
   const el = document.createElement("div");
-  el.style.cssText = retroPanelStyle(`
-    position: fixed; bottom: 20px; left: 20px;
-    pointer-events: none; z-index: 10; text-align: center;
-    border-color: #ff3b3b;
-  `);
+  el.style.cssText = `
+    position: fixed; top: 16px; right: 16px; z-index: 10; pointer-events: none;
+    display: flex; flex-direction: column; align-items: flex-end;
+  `;
+
+  const tachoWrap = document.createElement("div");
+  tachoWrap.style.cssText = `
+    display: flex; gap: 2px; transform: skewX(-18deg); margin-bottom: 6px; margin-right: 8px;
+  `;
+  const segments: HTMLDivElement[] = [];
+  for (let i = 0; i < TACHO_SEGMENTS; i++) {
+    const hue = 120 - (i / TACHO_SEGMENTS) * 120;
+    const seg = document.createElement("div");
+    seg.style.cssText = `width: 7px; height: 16px; background: hsl(${hue}, 85%, 50%); opacity: 0.2;`;
+    tachoWrap.appendChild(seg);
+    segments.push(seg);
+  }
+  el.appendChild(tachoWrap);
+
+  const panel = document.createElement("div");
+  panel.style.cssText = retroPanelStyle(`border-color: #ff3b3b; text-align: right; min-width: 150px;`);
+  el.appendChild(panel);
 
   const value = document.createElement("div");
-  value.style.cssText = "font-size: 42px; line-height: 1; color: #fff;";
-  el.appendChild(value);
+  value.style.cssText = `
+    font-size: 40px; line-height: 1; color: #ff2b2b; letter-spacing: 3px;
+    text-shadow: 0 0 8px rgba(255, 40, 40, 0.75);
+  `;
+  panel.appendChild(value);
 
-  const label = document.createElement("div");
-  label.style.cssText = "font-size: 13px; color: #ff3b3b; margin-top: 2px;";
-  label.textContent = "KM/H";
-  el.appendChild(label);
+  const unit = document.createElement("div");
+  unit.style.cssText = "font-size: 12px; color: #ff3b3b; margin-top: 2px;";
+  unit.textContent = "KM/H";
+  panel.appendChild(unit);
+
+  const timer = document.createElement("div");
+  timer.style.cssText = "font-size: 18px; color: #fff; margin-top: 8px; letter-spacing: 1px;";
+  panel.appendChild(timer);
 
   document.body.appendChild(el);
 
   return {
-    update(speedKmh: number) {
-      value.textContent = String(Math.max(0, Math.round(speedKmh))).padStart(3, "0");
+    update(speedKmh: number, timeText: string) {
+      const v = Math.max(0, Math.round(speedKmh));
+      value.textContent = String(v).padStart(3, "0");
+      timer.textContent = timeText;
+
+      const lit = Math.round((Math.min(v, maxSpeedKmh) / maxSpeedKmh) * TACHO_SEGMENTS);
+      segments.forEach((seg, i) => {
+        seg.style.opacity = i < lit ? "1" : "0.2";
+      });
     },
   };
 }
@@ -61,7 +95,7 @@ export function createSpeedHud() {
 export function createLapHud() {
   const el = document.createElement("div");
   el.style.cssText = retroPanelStyle(`
-    position: fixed; top: 16px; left: 16px;
+    position: fixed; top: 108px; left: 16px;
     pointer-events: none; z-index: 10; font-size: 15px; line-height: 1.7;
     min-width: 150px;
   `);
@@ -71,7 +105,6 @@ export function createLapHud() {
     update(
       lapCount: number,
       totalLaps: number,
-      elapsedMs: number,
       lastMs: number | null,
       bestMs: number | null,
       formatTime: (ms: number) => string
@@ -81,10 +114,110 @@ export function createLapHud() {
           lapCount + 1,
           totalLaps
         )}</span>/${totalLaps}</div>
-        <div>TEMPO ${formatTime(elapsedMs)}</div>
-        <div style="color:#8ecbff;">ÚLTIMA ${lastMs !== null ? formatTime(lastMs) : "--:--"}</div>
-        <div style="color:#8effa0;">MELHOR ${bestMs !== null ? formatTime(bestMs) : "--:--"}</div>
+        <div style="color:#8ecbff;">ÚLTIMA ${lastMs !== null ? formatTime(lastMs) : "--'--\"--"}</div>
+        <div style="color:#8effa0;">MELHOR ${bestMs !== null ? formatTime(bestMs) : "--'--\"--"}</div>
       `;
+    },
+  };
+}
+
+/** Minimapa da pista (contorno visto de cima) com um ponto móvel por carro, tipo painel SNES. */
+export function createMinimap(waypoints: { x: number; z: number }[]) {
+  const width = 116;
+  const height = 80;
+  const pad = 10;
+
+  const xs = waypoints.map((w) => w.x);
+  const zs = waypoints.map((w) => w.z);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minZ = Math.min(...zs);
+  const maxZ = Math.max(...zs);
+
+  function project(x: number, z: number): [number, number] {
+    const px = pad + ((x - minX) / (maxX - minX)) * (width - 2 * pad);
+    const py = pad + ((z - minZ) / (maxZ - minZ)) * (height - 2 * pad);
+    return [px, py];
+  }
+
+  const pathD =
+    waypoints
+      .map((w, i) => {
+        const [px, py] = project(w.x, w.z);
+        return `${i === 0 ? "M" : "L"}${px.toFixed(1)},${py.toFixed(1)}`;
+      })
+      .join(" ") + " Z";
+
+  const container = document.createElement("div");
+  container.style.cssText = retroPanelStyle(`
+    position: fixed; top: 16px; left: 16px; z-index: 10; pointer-events: none; padding: 6px;
+  `);
+
+  const svgNS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("width", String(width));
+  svg.setAttribute("height", String(height));
+  svg.style.display = "block";
+
+  const bg = document.createElementNS(svgNS, "rect");
+  bg.setAttribute("width", String(width));
+  bg.setAttribute("height", String(height));
+  bg.setAttribute("fill", "#0b0b1a");
+  svg.appendChild(bg);
+
+  const path = document.createElementNS(svgNS, "path");
+  path.setAttribute("d", pathD);
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", "#fff");
+  path.setAttribute("stroke-width", "3");
+  path.setAttribute("stroke-linejoin", "round");
+  svg.appendChild(path);
+
+  const dotsGroup = document.createElementNS(svgNS, "g");
+  svg.appendChild(dotsGroup);
+
+  container.appendChild(svg);
+  document.body.appendChild(container);
+
+  const dots = new Map<string, SVGCircleElement>();
+
+  return {
+    update(cars: { id: string; x: number; z: number; color: number; isPlayer: boolean }[]) {
+      for (const car of cars) {
+        let dot = dots.get(car.id);
+        if (!dot) {
+          dot = document.createElementNS(svgNS, "circle") as SVGCircleElement;
+          dot.setAttribute("r", car.isPlayer ? "3.4" : "2.4");
+          dot.setAttribute("stroke", "#000");
+          dot.setAttribute("stroke-width", "0.6");
+          dot.setAttribute("fill", colorToCss(car.color));
+          dotsGroup.appendChild(dot);
+          dots.set(car.id, dot);
+        }
+        const [px, py] = project(car.x, car.z);
+        dot.setAttribute("cx", px.toFixed(1));
+        dot.setAttribute("cy", py.toFixed(1));
+      }
+    },
+  };
+}
+
+/** Indicador grande de colocação (tipo "1ST"), canto inferior direito. */
+export function createPositionBadge() {
+  const el = document.createElement("div");
+  el.style.cssText = `
+    position: fixed; bottom: 20px; right: 20px; z-index: 10; pointer-events: none;
+    font-family: ${RETRO_FONT}; font-weight: 700; font-style: italic; font-size: 58px;
+    color: #fff; text-shadow: 3px 3px 0 #000, -2px -2px 0 #ff3b3b; letter-spacing: 1px;
+  `;
+  document.body.appendChild(el);
+
+  return {
+    update(position: number) {
+      const suffixes = ["ST", "ND", "RD"];
+      const suffix = position <= 3 ? suffixes[position - 1] : "TH";
+      el.textContent = `${position}${suffix}`;
     },
   };
 }
@@ -92,7 +225,7 @@ export function createLapHud() {
 export function createLeaderboardHud() {
   const el = document.createElement("div");
   el.style.cssText = retroPanelStyle(`
-    position: fixed; top: 16px; right: 16px;
+    position: fixed; top: 168px; right: 16px;
     pointer-events: none; z-index: 10; font-size: 14px;
     min-width: 170px;
   `);

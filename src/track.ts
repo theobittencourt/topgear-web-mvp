@@ -174,6 +174,73 @@ function buildSkirt(
   return mesh;
 }
 
+/**
+ * Constrói uma parede vertical que acompanha a elevação da pista tanto na base quanto no topo
+ * (diferente da "saia", que vai até um nível de chão constante). Usada pras paredes do túnel.
+ */
+function buildWall(
+  pts: THREE.Vector2[],
+  elevation: number[],
+  baseOffset: number,
+  topOffset: number,
+  material: THREE.Material
+): THREE.Mesh {
+  const positions: number[] = [];
+  const n = Math.min(pts.length, elevation.length) - 1;
+
+  for (let i = 0; i < n; i++) {
+    const p0 = pts[i];
+    const p1 = pts[i + 1];
+    const base0 = elevation[i] + baseOffset;
+    const base1 = elevation[i + 1] + baseOffset;
+    const top0 = elevation[i] + topOffset;
+    const top1 = elevation[i + 1] + topOffset;
+
+    const quad = [
+      [p0.x, base0, p0.y],
+      [p1.x, base1, p1.y],
+      [p1.x, top1, p1.y],
+      [p0.x, base0, p0.y],
+      [p1.x, top1, p1.y],
+      [p0.x, top0, p0.y],
+    ];
+    for (const v of quad) positions.push(v[0], v[1], v[2]);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.computeVertexNormals();
+
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+/** Portal de concreto (dois pilares + viga) numa das pontas do túnel. */
+function createTunnelPortal(width: number, height: number, material: THREE.Material): THREE.Group {
+  const group = new THREE.Group();
+  const thickness = 1.4;
+
+  const pillarGeometry = new THREE.BoxGeometry(thickness, height, thickness);
+  for (const side of [-1, 1]) {
+    const pillar = new THREE.Mesh(pillarGeometry, material);
+    pillar.position.set((side * (width + thickness)) / 2, height / 2, 0);
+    pillar.castShadow = true;
+    group.add(pillar);
+  }
+
+  const lintel = new THREE.Mesh(
+    new THREE.BoxGeometry(width + thickness * 3, thickness * 1.6, thickness * 1.6),
+    material
+  );
+  lintel.position.set(0, height + thickness * 0.8, 0);
+  lintel.castShadow = true;
+  group.add(lintel);
+
+  return group;
+}
+
 function stadiumShape(width: number, height: number, radius: number): THREE.Shape {
   const shape = new THREE.Shape();
   const hw = width / 2 - radius;
@@ -301,11 +368,12 @@ function createCloud(): THREE.Group {
   return cloud;
 }
 
-function createMountain(height: number, color: number): THREE.Mesh {
-  const mountain = new THREE.Mesh(
-    new THREE.ConeGeometry(height * 0.9, height, 5),
-    new THREE.MeshStandardMaterial({ color, roughness: 1 })
-  );
+/** Montanha arredondada (cúpula), largura e altura variam independentemente pra ter tamanhos bem diferentes. */
+function createMountain(height: number, width: number, color: number): THREE.Mesh {
+  // só a metade de cima de uma esfera (domo), assentada no chão — dá o formato de morro arredondado
+  const geometry = new THREE.SphereGeometry(1, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+  const mountain = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color, roughness: 1 }));
+  mountain.scale.set(width, height, width);
   return mountain;
 }
 
@@ -358,6 +426,78 @@ export function createTrack(scene: THREE.Scene) {
   scene.add(buildSkirt(outerCurbPts, elevation, 0.01, -0.01, skirtMaterial));
   scene.add(buildSkirt(innerCurbPts, elevation, 0.01, -0.01, skirtMaterial));
 
+  // túnel bem comprido na reta de cima (oposta à largada) — acha o trecho reto onde z é máximo
+  const topStraightZ = outerH / 2;
+  let tunnelStartIdx = -1;
+  let tunnelEndIdx = -1;
+  for (let i = 0; i < outerEdgePts.length; i++) {
+    if (Math.abs(outerEdgePts[i].y - topStraightZ) < 0.5) {
+      if (tunnelStartIdx === -1) tunnelStartIdx = i;
+      tunnelEndIdx = i;
+    }
+  }
+  const TUNNEL_MARGIN = 3;
+  const tunnelA = tunnelStartIdx + TUNNEL_MARGIN;
+  const tunnelB = tunnelEndIdx - TUNNEL_MARGIN;
+
+  if (tunnelStartIdx !== -1 && tunnelB > tunnelA) {
+    const TUNNEL_HEIGHT = 10;
+    const tunnelOuterPts = outerEdgePts.slice(tunnelA, tunnelB + 1);
+    const tunnelInnerPts = innerEdgePts.slice(tunnelA, tunnelB + 1);
+    const tunnelElevation = elevation.slice(tunnelA, tunnelB + 1);
+
+    const tunnelWallMaterial = new THREE.MeshStandardMaterial({
+      color: 0x3d3d3d,
+      roughness: 0.9,
+      side: THREE.DoubleSide,
+    });
+    const tunnelRoofMaterial = new THREE.MeshStandardMaterial({
+      color: 0x232323,
+      roughness: 0.95,
+      side: THREE.DoubleSide,
+    });
+
+    scene.add(buildWall(tunnelOuterPts, tunnelElevation, 0, TUNNEL_HEIGHT, tunnelWallMaterial));
+    scene.add(buildWall(tunnelInnerPts, tunnelElevation, 0, TUNNEL_HEIGHT, tunnelWallMaterial));
+    scene.add(buildRibbon(tunnelOuterPts, tunnelInnerPts, tunnelElevation, TUNNEL_HEIGHT, tunnelRoofMaterial));
+
+    // luzes de teto (caixinhas emissivas), tipo luminárias de túnel
+    const tunnelLightMaterial = new THREE.MeshStandardMaterial({
+      color: 0xfff2b0,
+      emissive: 0xffdd66,
+      emissiveIntensity: 1.3,
+    });
+    for (let i = tunnelA + 2; i < tunnelB - 2; i += 4) {
+      const outerPt = outerEdgePts[i];
+      const innerPt = innerEdgePts[i];
+      const nextOuter = outerEdgePts[i + 1];
+      const cx = (outerPt.x + innerPt.x) / 2;
+      const cz = (outerPt.y + innerPt.y) / 2;
+      const heading = Math.atan2(nextOuter.x - outerPt.x, nextOuter.y - outerPt.y);
+      const light = new THREE.Mesh(new THREE.BoxGeometry(roadWidth * 0.5, 0.15, 1.4), tunnelLightMaterial);
+      light.position.set(cx, elevation[i] + TUNNEL_HEIGHT - 0.35, cz);
+      light.rotation.y = heading;
+      scene.add(light);
+    }
+
+    // portais de concreto nas duas pontas do túnel
+    const portalMaterial = new THREE.MeshStandardMaterial({ color: 0x8a8578, roughness: 1 });
+    function placePortal(index: number) {
+      const outerPt = outerEdgePts[index];
+      const innerPt = innerEdgePts[index];
+      const nextOuter = outerEdgePts[Math.min(index + 1, outerEdgePts.length - 1)];
+      const cx = (outerPt.x + innerPt.x) / 2;
+      const cz = (outerPt.y + innerPt.y) / 2;
+      const heading = Math.atan2(nextOuter.x - outerPt.x, nextOuter.y - outerPt.y);
+      const portal = createTunnelPortal(roadWidth + 3, TUNNEL_HEIGHT, portalMaterial);
+      portal.position.set(cx, elevation[index], cz);
+      portal.rotation.y = heading;
+      scene.add(portal);
+    }
+    placePortal(tunnelA);
+    placePortal(tunnelB);
+  }
+
   const centerW = outerW - roadWidth;
   const centerH = outerH - roadWidth;
   const centerR = Math.max(cornerRadius - roadWidth / 2, 1);
@@ -401,9 +541,9 @@ export function createTrack(scene: THREE.Scene) {
   stand.receiveShadow = true;
   scene.add(stand);
 
-  // árvores ao redor da pista — dois anéis (mais perto e mais longe) pra dar densidade e profundidade
-  const foliageColors = [0x2f7a3d, 0x357a42, 0x2a6b36, 0x3d8a4a];
-  function scatterTrees(ringOffset: number, pointCount: number, everyN: number) {
+  // árvores ao redor da pista — vários anéis (perto, médio, longe) pra dar densidade e profundidade
+  const foliageColors = [0x2f7a3d, 0x357a42, 0x2a6b36, 0x3d8a4a, 0x276b38, 0x4a9456];
+  function scatterTrees(ringOffset: number, pointCount: number, everyN: number, jitterRange: number) {
     const pts = stadiumShape(outerW + ringOffset, outerH + ringOffset, cornerRadius + ringOffset / 2).getSpacedPoints(
       pointCount
     );
@@ -411,35 +551,58 @@ export function createTrack(scene: THREE.Scene) {
       if (i % everyN !== 0) return;
       const jitter = Math.abs((Math.sin(i * 12.9898 + ringOffset) * 43758.5453) % 1);
       const jitter2 = Math.abs((Math.sin(i * 78.233 + ringOffset) * 12543.113) % 1);
-      const tree = createTree(foliageColors[i % foliageColors.length]);
-      tree.position.set(p.x + (jitter - 0.5) * 6, 0, p.y + (jitter2 - 0.5) * 6);
-      tree.scale.setScalar(0.7 + jitter * 0.7);
+      const tree = createTree(foliageColors[(i + Math.floor(ringOffset)) % foliageColors.length]);
+      tree.position.set(p.x + (jitter - 0.5) * jitterRange, 0, p.y + (jitter2 - 0.5) * jitterRange);
+      tree.scale.setScalar(0.65 + jitter * 0.85);
       scene.add(tree);
     });
   }
-  scatterTrees(55, 48, 1);
-  scatterTrees(95, 40, 1);
-  scatterTrees(140, 32, 2);
+  scatterTrees(18, 64, 3, 5);
+  scatterTrees(55, 72, 1, 7);
+  scatterTrees(90, 64, 1, 8);
+  scatterTrees(130, 56, 1, 10);
+  scatterTrees(175, 48, 1, 14);
+  scatterTrees(225, 40, 1, 18);
 
-  // nuvens no céu
-  for (let i = 0; i < 10; i++) {
-    const cloud = createCloud();
-    const angle = (i / 10) * Math.PI * 2;
-    const radius = 220 + Math.random() * 120;
-    cloud.position.set(Math.cos(angle) * radius, 55 + Math.random() * 25, Math.sin(angle) * radius);
-    scene.add(cloud);
-  }
+  // nuvens no céu — várias camadas de altura/distância
+  const cloudLayers = [
+    { count: 14, radiusMin: 160, radiusRange: 90, heightMin: 45, heightRange: 15 },
+    { count: 12, radiusMin: 260, radiusRange: 120, heightMin: 65, heightRange: 25 },
+    { count: 10, radiusMin: 380, radiusRange: 140, heightMin: 90, heightRange: 35 },
+  ];
+  cloudLayers.forEach((layer, layerIndex) => {
+    for (let i = 0; i < layer.count; i++) {
+      const cloud = createCloud();
+      const angle = (i / layer.count) * Math.PI * 2 + layerIndex * 0.3;
+      const radius = layer.radiusMin + Math.random() * layer.radiusRange;
+      cloud.position.set(
+        Math.cos(angle) * radius,
+        layer.heightMin + Math.random() * layer.heightRange,
+        Math.sin(angle) * radius
+      );
+      cloud.scale.setScalar(0.8 + Math.random() * 0.9);
+      scene.add(cloud);
+    }
+  });
 
-  // montanhas no horizonte, pra dar profundidade ao fundo
-  const mountainColors = [0x5a6b7a, 0x6b7a88, 0x4d5c6b];
-  for (let i = 0; i < 14; i++) {
-    const angle = (i / 14) * Math.PI * 2;
-    const radius = 320 + Math.random() * 60;
-    const height = 40 + Math.random() * 50;
-    const mountain = createMountain(height, mountainColors[i % mountainColors.length]);
-    mountain.position.set(Math.cos(angle) * radius, height / 2 - 4, Math.sin(angle) * radius);
-    scene.add(mountain);
-  }
+  // montanhas arredondadas no horizonte — três cadeias em distâncias diferentes, tamanhos bem variados
+  const mountainColors = [0x5a6b7a, 0x6b7a88, 0x4d5c6b, 0x62778a, 0x445468, 0x738495];
+  const mountainRanges = [
+    { count: 28, radiusMin: 280, radiusRange: 50, heightMin: 18, heightRange: 22, widthMin: 20, widthRange: 25 },
+    { count: 34, radiusMin: 360, radiusRange: 90, heightMin: 30, heightRange: 45, widthMin: 28, widthRange: 35 },
+    { count: 30, radiusMin: 480, radiusRange: 110, heightMin: 45, heightRange: 75, widthMin: 35, widthRange: 45 },
+  ];
+  mountainRanges.forEach((range, rangeIndex) => {
+    for (let i = 0; i < range.count; i++) {
+      const angle = (i / range.count) * Math.PI * 2 + rangeIndex * 0.15;
+      const radius = range.radiusMin + Math.random() * range.radiusRange;
+      const height = range.heightMin + Math.random() * range.heightRange;
+      const width = range.widthMin + Math.random() * range.widthRange;
+      const mountain = createMountain(height, width, mountainColors[(i + rangeIndex) % mountainColors.length]);
+      mountain.position.set(Math.cos(angle) * radius, -3, Math.sin(angle) * radius);
+      scene.add(mountain);
+    }
+  });
 
   return {
     startPosition,
