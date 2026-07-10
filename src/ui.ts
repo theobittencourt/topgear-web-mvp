@@ -457,10 +457,10 @@ export function createNameEntryScreen(onStart: (name: string) => void) {
     border: 4px solid #fff; box-shadow: 5px 5px 0 #000; padding: 10px 16px; width: 280px;
     margin-bottom: 28px; caret-color: #ff3b3b;
   `;
-  input.style.userSelect = "text";
-  input.style.webkitUserSelect = "text";
-  input.style.MozUserSelect = "text";
-  input.style.msUserSelect = "text";
+  input.style.setProperty("user-select", "text");
+  input.style.setProperty("-webkit-user-select", "text");
+  input.style.setProperty("-moz-user-select", "text");
+  input.style.setProperty("-ms-user-select", "text");
   input.addEventListener("input", () => {
     input.value = input.value.toUpperCase().replace(/[^A-Z0-9 ]/g, "");
   });

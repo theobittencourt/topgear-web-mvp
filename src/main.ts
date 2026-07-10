@@ -37,10 +37,10 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 app.appendChild(renderer.domElement);
 
-document.body.style.userSelect = "none";
-document.body.style.webkitUserSelect = "none";
-document.body.style.MozUserSelect = "none";
-document.body.style.msUserSelect = "none";
+document.body.style.setProperty("user-select", "none");
+document.body.style.setProperty("-webkit-user-select", "none");
+document.body.style.setProperty("-moz-user-select", "none");
+document.body.style.setProperty("-ms-user-select", "none");
 
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
