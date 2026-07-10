@@ -5,52 +5,60 @@ export function createCarMesh(): THREE.Group {
   const group = new THREE.Group();
 
   const bodyMaterial = new THREE.MeshStandardMaterial({
-    color: 0xd4342c,
+    color: 0xe8e8e8,
     metalness: 0.5,
-    roughness: 0.35,
+    roughness: 0.3,
   });
 
-  // chassi principal (mais baixo e largo)
-  const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.45, 3.8), bodyMaterial);
-  body.position.y = 0.42;
+  // chassi principal (baixo, largo e comprido, tipo supercarro)
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.38, 4.4), bodyMaterial);
+  body.position.y = 0.36;
   body.castShadow = true;
   group.add(body);
 
-  // capô inclinado (frente afunilada)
-  const hood = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.35, 1.1), bodyMaterial);
-  hood.position.set(0, 0.55, 1.55);
-  hood.rotation.x = -0.18;
+  // capô longo e baixo (frente afunilada)
+  const hood = new THREE.Mesh(new THREE.BoxGeometry(1.85, 0.28, 1.7), bodyMaterial);
+  hood.position.set(0, 0.44, 1.85);
+  hood.rotation.x = -0.12;
   hood.castShadow = true;
   group.add(hood);
 
-  // cabine
+  // alargamentos traseiros (dão a silhueta larga de supercarro)
+  for (const side of [-1, 1]) {
+    const fender = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.4, 1.6), bodyMaterial);
+    fender.position.set(side * 1.05, 0.4, -0.9);
+    fender.castShadow = true;
+    group.add(fender);
+  }
+
+  // cabine baixa, mais pra trás
   const cabinMaterial = new THREE.MeshStandardMaterial({
     color: 0x161616,
     metalness: 0.3,
     roughness: 0.5,
   });
-  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.55, 1.7), cabinMaterial);
-  cabin.position.set(0, 0.85, -0.35);
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.42, 1.8), cabinMaterial);
+  cabin.position.set(0, 0.72, -0.55);
   cabin.castShadow = true;
   group.add(cabin);
 
   // para-brisa inclinado
   const windshield = new THREE.Mesh(
-    new THREE.BoxGeometry(1.3, 0.5, 0.12),
+    new THREE.BoxGeometry(1.45, 0.4, 0.12),
     new THREE.MeshStandardMaterial({ color: 0x88ccee, metalness: 0.2, roughness: 0.1, transparent: true, opacity: 0.6 })
   );
-  windshield.position.set(0, 0.85, 0.5);
-  windshield.rotation.x = -0.5;
+  windshield.position.set(0, 0.72, 0.4);
+  windshield.rotation.x = -0.55;
   group.add(windshield);
 
   // aerofólio traseiro
   const spoilerMaterial = new THREE.MeshStandardMaterial({ color: 0x161616, metalness: 0.3, roughness: 0.5 });
-  const spoilerWing = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.08, 0.4), spoilerMaterial);
-  spoilerWing.position.set(0, 0.95, -1.85);
+  const spoilerWing = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.08, 0.45), spoilerMaterial);
+  spoilerWing.position.set(0, 0.85, -2.2);
   group.add(spoilerWing);
-  for (const side of [-0.7, 0.7]) {
-    const strut = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.35, 0.08), spoilerMaterial);
-    strut.position.set(side, 0.75, -1.85);
+  for (const side of [-0.8, 0.8]) {
+    const strut = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.3, 0.08), spoilerMaterial);
+    strut.position.set(side, 0.68, -2.2);
     group.add(strut);
   }
 
@@ -60,9 +68,9 @@ export function createCarMesh(): THREE.Group {
     emissive: 0xffffaa,
     emissiveIntensity: 0.8,
   });
-  for (const side of [-0.7, 0.7]) {
-    const headlight = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.15, 0.1), headlightMaterial);
-    headlight.position.set(side, 0.5, 1.95);
+  for (const side of [-0.75, 0.75]) {
+    const headlight = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.14, 0.1), headlightMaterial);
+    headlight.position.set(side, 0.42, 2.65);
     group.add(headlight);
   }
 
@@ -72,20 +80,20 @@ export function createCarMesh(): THREE.Group {
     emissive: 0xaa0000,
     emissiveIntensity: 0.7,
   });
-  for (const side of [-0.75, 0.75]) {
-    const taillight = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.15, 0.08), taillightMaterial);
-    taillight.position.set(side, 0.5, -1.92);
+  for (const side of [-0.85, 0.85]) {
+    const taillight = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.14, 0.08), taillightMaterial);
+    taillight.position.set(side, 0.42, -2.22);
     group.add(taillight);
   }
 
-  // rodas (pneu + roda)
+  // rodas (pneu + roda) — largas, tipo supercarro
   const tireMaterial = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.8 });
   const rimMaterial = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8, roughness: 0.3 });
   const wheelOffsets: [number, number, number][] = [
-    [-0.95, 0.36, 1.15],
-    [0.95, 0.36, 1.15],
-    [-0.95, 0.36, -1.15],
-    [0.95, 0.36, -1.15],
+    [-1.05, 0.36, 1.35],
+    [1.05, 0.36, 1.35],
+    [-1.05, 0.36, -1.35],
+    [1.05, 0.36, -1.35],
   ];
   for (const [x, y, z] of wheelOffsets) {
     const tire = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.28, 16), tireMaterial);
@@ -117,7 +125,7 @@ export class CarController {
   readonly friction = 6;
   readonly turnSpeed = 2.2;
 
-  private waypoints?: THREE.Vector3[];
+  protected waypoints?: THREE.Vector3[];
 
   constructor(mesh: THREE.Group, waypoints?: THREE.Vector3[]) {
     this.mesh = mesh;
@@ -170,7 +178,6 @@ function normalizeAngle(angle: number): number {
 }
 
 export class AICarController extends CarController {
-  private waypoints: THREE.Vector3[];
   private targetIndex: number;
   readonly cruiseThrottle: number;
 
@@ -186,13 +193,13 @@ export class AICarController extends CarController {
   }
 
   updateAI(dt: number) {
-    const target = this.waypoints[this.targetIndex];
+    const target = this.waypoints![this.targetIndex];
     const dx = target.x - this.mesh.position.x;
     const dz = target.z - this.mesh.position.z;
     const distance = Math.hypot(dx, dz);
 
     if (distance < 8) {
-      this.targetIndex = (this.targetIndex + 1) % this.waypoints.length;
+      this.targetIndex = (this.targetIndex + 1) % this.waypoints!.length;
     }
 
     const desiredHeading = Math.atan2(dx, dz);

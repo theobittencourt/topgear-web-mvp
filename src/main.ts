@@ -118,7 +118,7 @@ const aiCars: AICarController[] = aiColors.map((color, i) => {
 const racers: Racer[] = [
   {
     label: "JOGADOR",
-    color: 0xd4342c,
+    color: 0xe8e8e8,
     isPlayer: true,
     controller: car,
     progress: new RaceProgress(waypoints, startIdx, startIdx),
