@@ -37,6 +37,11 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 app.appendChild(renderer.domElement);
 
+document.body.style.userSelect = "none";
+document.body.style.webkitUserSelect = "none";
+document.body.style.MozUserSelect = "none";
+document.body.style.msUserSelect = "none";
+
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
