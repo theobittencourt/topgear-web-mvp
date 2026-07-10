@@ -16,6 +16,64 @@ export function elevationAt(x: number, z: number): number {
   );
 }
 
+export const ROAD_WIDTH = 18;
+
+/**
+ * Acha o waypoint (ponto do centro da pista) mais próximo de (x,z). Usado tanto pra saber a
+ * altura correta do carro (em vez de recalcular a fórmula de elevação na posição bruta do carro,
+ * que diverge da pista quando ele não está exatamente no centro) quanto pra detectar se o carro
+ * saiu da pista.
+ */
+export function findNearestWaypoint(
+  x: number,
+  z: number,
+  waypoints: THREE.Vector3[]
+): { index: number; distance: number } {
+  let best = 0;
+  let bestDistSq = Infinity;
+  for (let i = 0; i < waypoints.length; i++) {
+    const dx = waypoints[i].x - x;
+    const dz = waypoints[i].z - z;
+    const d = dx * dx + dz * dz;
+    if (d < bestDistSq) {
+      bestDistSq = d;
+      best = i;
+    }
+  }
+  return { index: best, distance: Math.sqrt(bestDistSq) };
+}
+
+/**
+ * Altura suave da pista em (x,z): acha o waypoint mais próximo e projeta a posição no segmento
+ * vizinho (anterior ou seguinte, o que estiver mais perto) pra interpolar a elevação entre os
+ * dois. Usar só a altura do waypoint mais próximo faz o carro "pular" toda vez que o waypoint
+ * mais próximo muda — como andar em paralelepípedo.
+ */
+export function sampleTrackElevation(x: number, z: number, waypoints: THREE.Vector3[]): number {
+  const { index } = findNearestWaypoint(x, z, waypoints);
+  const n = waypoints.length;
+  const prev = waypoints[(index - 1 + n) % n];
+  const curr = waypoints[index];
+  const next = waypoints[(index + 1) % n];
+
+  function projectOnSegment(a: THREE.Vector3, b: THREE.Vector3) {
+    const abx = b.x - a.x;
+    const abz = b.z - a.z;
+    const lenSq = abx * abx + abz * abz;
+    let t = lenSq > 0 ? ((x - a.x) * abx + (z - a.z) * abz) / lenSq : 0;
+    t = THREE.MathUtils.clamp(t, 0, 1);
+    const px = a.x + abx * t;
+    const pz = a.z + abz * t;
+    const dist = Math.hypot(x - px, z - pz);
+    return { t, dist, elevation: THREE.MathUtils.lerp(a.y, b.y, t) };
+  }
+
+  const segA = projectOnSegment(prev, curr);
+  const segB = projectOnSegment(curr, next);
+
+  return segA.dist <= segB.dist ? segA.elevation : segB.elevation;
+}
+
 /**
  * Calcula UMA elevação por índice (usando o ponto médio entre a borda externa e interna da
  * pista naquele índice), pra usar nos dois lados da fita — se cada borda calculasse sua própria
@@ -205,7 +263,7 @@ function createCheckeredTexture(): THREE.Texture {
   return texture;
 }
 
-function createTree(): THREE.Group {
+function createTree(foliageColor = 0x2f7a3d): THREE.Group {
   const tree = new THREE.Group();
 
   const trunk = new THREE.Mesh(
@@ -216,7 +274,7 @@ function createTree(): THREE.Group {
   trunk.castShadow = true;
   tree.add(trunk);
 
-  const foliageMaterial = new THREE.MeshStandardMaterial({ color: 0x2f7a3d });
+  const foliageMaterial = new THREE.MeshStandardMaterial({ color: foliageColor });
   const foliage1 = new THREE.Mesh(new THREE.ConeGeometry(1.6, 2.4, 8), foliageMaterial);
   foliage1.position.y = 2.4;
   foliage1.castShadow = true;
@@ -228,6 +286,27 @@ function createTree(): THREE.Group {
   tree.add(foliage2);
 
   return tree;
+}
+
+function createCloud(): THREE.Group {
+  const cloud = new THREE.Group();
+  const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 });
+  const puffCount = 4 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < puffCount; i++) {
+    const puff = new THREE.Mesh(new THREE.SphereGeometry(3 + Math.random() * 2, 8, 6), material);
+    puff.position.set(i * 3.5 - (puffCount * 3.5) / 2, Math.random() * 1.5, Math.random() * 2);
+    puff.scale.y = 0.6;
+    cloud.add(puff);
+  }
+  return cloud;
+}
+
+function createMountain(height: number, color: number): THREE.Mesh {
+  const mountain = new THREE.Mesh(
+    new THREE.ConeGeometry(height * 0.9, height, 5),
+    new THREE.MeshStandardMaterial({ color, roughness: 1 })
+  );
+  return mountain;
 }
 
 export function createTrack(scene: THREE.Scene) {
@@ -243,7 +322,7 @@ export function createTrack(scene: THREE.Scene) {
 
   const outerW = 210;
   const outerH = 140;
-  const roadWidth = 18;
+  const roadWidth = ROAD_WIDTH;
   const cornerRadius = 46;
 
   const innerW = outerW - roadWidth * 2;
@@ -252,8 +331,8 @@ export function createTrack(scene: THREE.Scene) {
 
   // pontos em alta resolução das bordas da pista (usados pro asfalto E pro meio-fio,
   // garantindo elevação suave e encaixe perfeito entre eles)
-  const outerEdgePts = stadiumShape(outerW, outerH, cornerRadius).getPoints(120);
-  const innerEdgePts = stadiumShape(innerW, innerH, innerR).getPoints(120);
+  const outerEdgePts = stadiumShape(outerW, outerH, cornerRadius).getSpacedPoints(120);
+  const innerEdgePts = stadiumShape(innerW, innerH, innerR).getSpacedPoints(120);
   const elevation = buildElevationProfile(outerEdgePts, innerEdgePts);
 
   const roadMaterial = new THREE.MeshStandardMaterial({
@@ -264,14 +343,14 @@ export function createTrack(scene: THREE.Scene) {
   scene.add(buildRibbon(outerEdgePts, innerEdgePts, elevation, 0, roadMaterial));
 
   // meio-fio em zebra (vermelho/branco), borda externa e interna
-  const outerCurbPts = stadiumShape(outerW + 3, outerH + 3, cornerRadius + 1.5).getPoints(120);
+  const outerCurbPts = stadiumShape(outerW + 3, outerH + 3, cornerRadius + 1.5).getSpacedPoints(120);
   scene.add(buildStripedRing(outerCurbPts, outerEdgePts, elevation, 0.01, 3));
 
   const innerCurbPts = stadiumShape(
     Math.max(innerW - 3, 1),
     Math.max(innerH - 3, 1),
     Math.max(innerR - 1.5, 0.5)
-  ).getPoints(120);
+  ).getSpacedPoints(120);
   scene.add(buildStripedRing(innerEdgePts, innerCurbPts, elevation, 0.01, 3));
 
   // "saias" fechando o vão entre a pista elevada e a grama (evita buracos/flutuação visual)
@@ -284,7 +363,7 @@ export function createTrack(scene: THREE.Scene) {
   const centerR = Math.max(cornerRadius - roadWidth / 2, 1);
   const centerlineShape = stadiumShape(centerW, centerH, centerR);
   const waypoints = centerlineShape
-    .getPoints(110)
+    .getSpacedPoints(110)
     .map((p) => new THREE.Vector3(p.x, elevationAt(p.x, p.y), p.y));
 
   // linha central tracejada
@@ -322,16 +401,45 @@ export function createTrack(scene: THREE.Scene) {
   stand.receiveShadow = true;
   scene.add(stand);
 
-  // árvores ao redor da pista
-  const outerScenicPts = stadiumShape(outerW + 55, outerH + 55, cornerRadius + 25).getPoints(36);
-  outerScenicPts.forEach((p, i) => {
-    if (i % 2 !== 0) return;
-    const tree = createTree();
-    const jitter = (Math.sin(i * 12.9898) * 43758.5453) % 1;
-    tree.position.set(p.x + jitter * 4, 0, p.y + jitter * 4);
-    tree.scale.setScalar(0.8 + Math.abs(jitter) * 0.6);
-    scene.add(tree);
-  });
+  // árvores ao redor da pista — dois anéis (mais perto e mais longe) pra dar densidade e profundidade
+  const foliageColors = [0x2f7a3d, 0x357a42, 0x2a6b36, 0x3d8a4a];
+  function scatterTrees(ringOffset: number, pointCount: number, everyN: number) {
+    const pts = stadiumShape(outerW + ringOffset, outerH + ringOffset, cornerRadius + ringOffset / 2).getSpacedPoints(
+      pointCount
+    );
+    pts.forEach((p, i) => {
+      if (i % everyN !== 0) return;
+      const jitter = Math.abs((Math.sin(i * 12.9898 + ringOffset) * 43758.5453) % 1);
+      const jitter2 = Math.abs((Math.sin(i * 78.233 + ringOffset) * 12543.113) % 1);
+      const tree = createTree(foliageColors[i % foliageColors.length]);
+      tree.position.set(p.x + (jitter - 0.5) * 6, 0, p.y + (jitter2 - 0.5) * 6);
+      tree.scale.setScalar(0.7 + jitter * 0.7);
+      scene.add(tree);
+    });
+  }
+  scatterTrees(55, 48, 1);
+  scatterTrees(95, 40, 1);
+  scatterTrees(140, 32, 2);
+
+  // nuvens no céu
+  for (let i = 0; i < 10; i++) {
+    const cloud = createCloud();
+    const angle = (i / 10) * Math.PI * 2;
+    const radius = 220 + Math.random() * 120;
+    cloud.position.set(Math.cos(angle) * radius, 55 + Math.random() * 25, Math.sin(angle) * radius);
+    scene.add(cloud);
+  }
+
+  // montanhas no horizonte, pra dar profundidade ao fundo
+  const mountainColors = [0x5a6b7a, 0x6b7a88, 0x4d5c6b];
+  for (let i = 0; i < 14; i++) {
+    const angle = (i / 14) * Math.PI * 2;
+    const radius = 320 + Math.random() * 60;
+    const height = 40 + Math.random() * 50;
+    const mountain = createMountain(height, mountainColors[i % mountainColors.length]);
+    mountain.position.set(Math.cos(angle) * radius, height / 2 - 4, Math.sin(angle) * radius);
+    scene.add(mountain);
+  }
 
   return {
     startPosition,

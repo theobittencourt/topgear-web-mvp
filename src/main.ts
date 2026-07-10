@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { createTrack } from "./track";
+import { createTrack, ROAD_WIDTH, findNearestWaypoint } from "./track";
 import { createCarMesh, CarController, AICarController } from "./car";
 import { resolveCarCollisions } from "./collision";
 import { RaceProgress, formatTime } from "./raceTimer";
@@ -10,6 +10,7 @@ import {
   createLapBanner,
   createCountdownOverlay,
   createVictoryOverlay,
+  createNameEntryScreen,
 } from "./ui";
 
 const TOTAL_LAPS = 3;
@@ -94,7 +95,7 @@ carMesh.position.copy(gridPosition(gridOffsets[0]));
 carMesh.rotation.y = startHeading;
 scene.add(carMesh);
 
-const car = new CarController(carMesh);
+const car = new CarController(carMesh, waypoints);
 car.heading = startHeading;
 
 const aiColors = [0x2266ee, 0xeedd22, 0x22aa66];
@@ -114,18 +115,18 @@ const aiCars: AICarController[] = aiColors.map((color, i) => {
 
 const racers: Racer[] = [
   {
-    label: "Você",
+    label: "JOGADOR",
     color: 0xd4342c,
     isPlayer: true,
     controller: car,
-    progress: new RaceProgress(waypoints, startIdx),
+    progress: new RaceProgress(waypoints, startIdx, startIdx),
   },
   ...aiCars.map((ai, i) => ({
     label: aiNames[i],
     color: aiColors[i],
     isPlayer: false,
     controller: ai as CarController,
-    progress: new RaceProgress(waypoints, startIdx),
+    progress: new RaceProgress(waypoints, startIdx, startIdx),
   })),
 ];
 
@@ -151,9 +152,19 @@ const playerRacer = racers[0];
 let raceOver = false;
 let raceStarted = false;
 
-countdownOverlay.start(() => {
-  raceStarted = true;
-  racers.forEach((r) => r.progress.resetLapClock());
+// se o carro sair da pista, ele volta pro último ponto onde estava na pista (perde o "atalho")
+const OFF_TRACK_DISTANCE = ROAD_WIDTH / 2 + 4;
+const OFF_TRACK_GRACE = 0.5;
+let lastOnTrackPosition = carMesh.position.clone();
+let lastOnTrackHeading = car.heading;
+let offTrackTimer = 0;
+
+createNameEntryScreen((name) => {
+  playerRacer.label = name;
+  countdownOverlay.start(() => {
+    raceStarted = true;
+    racers.forEach((r) => r.progress.resetLapClock());
+  });
 });
 
 const clock = new THREE.Clock();
@@ -179,6 +190,28 @@ function animate() {
 
     resolveCarCollisions(allCars);
 
+    const nearest = findNearestWaypoint(carMesh.position.x, carMesh.position.z, waypoints);
+    if (nearest.distance <= OFF_TRACK_DISTANCE) {
+      lastOnTrackPosition.copy(carMesh.position);
+      // usa a direção da PISTA nesse ponto (não a direção que o carro estava de fato apontando) —
+      // senão, se o carro já estivesse de leve apontado pra fora quando saiu, a recuperação o
+      // devolvia de volta na mesma direção errada e ele saía de novo imediatamente, em loop.
+      const nextWp = waypoints[(nearest.index + 1) % waypoints.length];
+      lastOnTrackHeading = Math.atan2(nextWp.x - carMesh.position.x, nextWp.z - carMesh.position.z);
+      offTrackTimer = 0;
+    } else {
+      offTrackTimer += dt;
+      if (offTrackTimer > OFF_TRACK_GRACE) {
+        carMesh.position.copy(lastOnTrackPosition);
+        car.heading = lastOnTrackHeading;
+        carMesh.rotation.y = lastOnTrackHeading;
+        car.speed = 0;
+        car.bumpVelocity.set(0, 0);
+        offTrackTimer = 0;
+        lapBanner.show("FORA DA PISTA!");
+      }
+    }
+
     const playerLapBefore = playerRacer.progress.lapCount;
     for (const racer of racers) {
       racer.progress.update(racer.controller.mesh.position);
@@ -199,7 +232,7 @@ function animate() {
   lapHud.update(
     playerRacer.progress.lapCount,
     TOTAL_LAPS,
-    playerRacer.progress.currentLapElapsed(),
+    raceStarted ? playerRacer.progress.currentLapElapsed() : 0,
     playerRacer.progress.lastLapTime,
     playerRacer.progress.bestLapTime,
     formatTime

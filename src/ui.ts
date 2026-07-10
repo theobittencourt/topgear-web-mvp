@@ -258,3 +258,100 @@ export function createVictoryOverlay(onRestart: () => void) {
     },
   };
 }
+
+const PLAYER_NAME_STORAGE_KEY = "topGearTest.playerName";
+const DEFAULT_PLAYER_NAME = "JOGADOR";
+
+export function createNameEntryScreen(onStart: (name: string) => void) {
+  const savedName = localStorage.getItem(PLAYER_NAME_STORAGE_KEY) ?? "";
+
+  const el = document.createElement("div");
+  el.style.cssText = `
+    position: fixed; inset: 0; background: #0b0b1a;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 30; font-family: ${RETRO_FONT}; color: #fff; text-align: center; gap: 8px;
+  `;
+
+  // faixa quadriculada, tipo largada
+  const checkerBar = document.createElement("div");
+  checkerBar.style.cssText = `
+    width: 340px; height: 20px; margin-bottom: 24px;
+    background-image: repeating-conic-gradient(#fff 0% 25%, #111 0% 50%);
+    background-size: 20px 20px;
+    border: 3px solid #fff;
+  `;
+  el.appendChild(checkerBar);
+
+  const title = document.createElement("div");
+  title.style.cssText = `
+    font-size: 54px; font-weight: 700; letter-spacing: 4px; text-transform: uppercase;
+    color: #ff3b3b; text-shadow: 4px 4px 0 #000, 8px 8px 0 #ffe14d;
+    margin-bottom: 8px;
+  `;
+  title.textContent = "TOP GEAR";
+  el.appendChild(title);
+
+  const subtitle = document.createElement("div");
+  subtitle.style.cssText = `
+    font-size: 16px; letter-spacing: 2px; text-transform: uppercase; color: #8ecbff;
+    margin-bottom: 40px;
+  `;
+  subtitle.textContent = "TEST DRIVE";
+  el.appendChild(subtitle);
+
+  const label = document.createElement("div");
+  label.style.cssText = `
+    font-size: 18px; letter-spacing: 2px; text-transform: uppercase; color: #ffe14d;
+    margin-bottom: 14px;
+  `;
+  label.textContent = "Digite seu nome";
+  el.appendChild(label);
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.maxLength = 10;
+  input.value = savedName;
+  input.placeholder = DEFAULT_PLAYER_NAME;
+  input.style.cssText = `
+    font-family: ${RETRO_FONT}; font-size: 32px; font-weight: 700; letter-spacing: 6px;
+    text-transform: uppercase; text-align: center; color: #fff; background: #14142b;
+    border: 4px solid #fff; box-shadow: 5px 5px 0 #000; padding: 10px 16px; width: 280px;
+    margin-bottom: 28px; caret-color: #ff3b3b;
+  `;
+  input.addEventListener("input", () => {
+    input.value = input.value.toUpperCase().replace(/[^A-Z0-9 ]/g, "");
+  });
+  el.appendChild(input);
+
+  const button = document.createElement("button");
+  button.textContent = "Iniciar";
+  button.style.cssText = `
+    font-family: ${RETRO_FONT}; font-size: 24px; font-weight: 700; letter-spacing: 2px;
+    text-transform: uppercase; padding: 14px 48px;
+    background: #1f8f3d; color: #fff; border: 3px solid #fff;
+    box-shadow: 4px 4px 0 #000; cursor: pointer;
+  `;
+  button.addEventListener("mouseenter", () => {
+    button.style.background = "#279a49";
+  });
+  button.addEventListener("mouseleave", () => {
+    button.style.background = "#1f8f3d";
+  });
+
+  function submit() {
+    const name = input.value.trim().slice(0, 10) || DEFAULT_PLAYER_NAME;
+    localStorage.setItem(PLAYER_NAME_STORAGE_KEY, name);
+    el.style.display = "none";
+    onStart(name);
+  }
+
+  button.addEventListener("click", submit);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submit();
+  });
+
+  el.appendChild(button);
+  document.body.appendChild(el);
+
+  window.setTimeout(() => input.focus(), 0);
+}

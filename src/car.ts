@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { elevationAt } from "./track";
+import { elevationAt, sampleTrackElevation } from "./track";
 
 export function createCarMesh(): THREE.Group {
   const group = new THREE.Group();
@@ -117,8 +117,11 @@ export class CarController {
   readonly friction = 6;
   readonly turnSpeed = 2.2;
 
-  constructor(mesh: THREE.Group) {
+  private waypoints?: THREE.Vector3[];
+
+  constructor(mesh: THREE.Group, waypoints?: THREE.Vector3[]) {
     this.mesh = mesh;
+    this.waypoints = waypoints;
   }
 
   update(dt: number, input: { throttle: number; brake: number; steer: number }) {
@@ -142,7 +145,15 @@ export class CarController {
 
     this.mesh.position.x += Math.sin(this.heading) * this.speed * dt + this.bumpVelocity.x * dt;
     this.mesh.position.z += Math.cos(this.heading) * this.speed * dt + this.bumpVelocity.y * dt;
-    this.mesh.position.y = elevationAt(this.mesh.position.x, this.mesh.position.z);
+
+    // usa a altura suave da pista (interpolada entre waypoints vizinhos) em vez de recalcular a
+    // fórmula de elevação na posição bruta do carro — que diverge da pista quando ele não está
+    // exatamente no centro (perto da borda, por exemplo)
+    if (this.waypoints) {
+      this.mesh.position.y = sampleTrackElevation(this.mesh.position.x, this.mesh.position.z, this.waypoints);
+    } else {
+      this.mesh.position.y = elevationAt(this.mesh.position.x, this.mesh.position.z);
+    }
     this.mesh.rotation.y = this.heading;
 
     // o empurrão de colisão decai rápido, tipo bumper car
@@ -168,7 +179,7 @@ export class AICarController extends CarController {
   private lastReverseSteer = 0;
 
   constructor(mesh: THREE.Group, waypoints: THREE.Vector3[], startIndex: number, cruiseThrottle = 0.85) {
-    super(mesh);
+    super(mesh, waypoints);
     this.waypoints = waypoints;
     this.targetIndex = startIndex;
     this.cruiseThrottle = cruiseThrottle;
