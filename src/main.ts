@@ -183,7 +183,7 @@ function setKey(key: string, value: boolean) {
 
 const speedHud = createSpeedHud(car.maxSpeed * 6);
 const lapHud = createLapHud();
-const leaderboardHud = createLeaderboardHud();
+const leaderboardHud = createLeaderboardHud(isMobileDevice);
 const minimap = createMinimap(waypoints);
 const positionBadge = createPositionBadge();
 const lapBanner = createLapBanner();

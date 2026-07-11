@@ -222,12 +222,13 @@ export function createPositionBadge() {
   };
 }
 
-export function createLeaderboardHud() {
+export function createLeaderboardHud(hidden = false) {
   const el = document.createElement("div");
   el.style.cssText = retroPanelStyle(`
     position: fixed; top: 168px; right: 16px;
     pointer-events: none; z-index: 10; font-size: 14px;
     min-width: 170px;
+    ${hidden ? "display: none;" : ""}
   `);
   document.body.appendChild(el);
 
