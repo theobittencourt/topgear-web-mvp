@@ -500,6 +500,139 @@ export function createNameEntryScreen(onStart: (name: string) => void) {
   window.setTimeout(() => input.focus(), 0);
 }
 
+export interface MapOption {
+  id: string;
+  name: string;
+}
+
+/** Tela de seleção de mapa, mesmo estilo retrô da tela de nome. */
+export function createMapSelectScreen(maps: MapOption[], onSelect: (id: string) => void) {
+  const el = document.createElement("div");
+  el.style.cssText = `
+    position: fixed; inset: 0; background: #0b0b1a;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 30; font-family: ${RETRO_FONT}; color: #fff; text-align: center; gap: 8px;
+  `;
+
+  const checkerBar = document.createElement("div");
+  checkerBar.style.cssText = `
+    width: 340px; height: 20px; margin-bottom: 24px;
+    background-image: repeating-conic-gradient(#fff 0% 25%, #111 0% 50%);
+    background-size: 20px 20px;
+    border: 3px solid #fff;
+  `;
+  el.appendChild(checkerBar);
+
+  const title = document.createElement("div");
+  title.style.cssText = `
+    font-size: 34px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
+    color: #ffe14d; text-shadow: 3px 3px 0 #000; margin-bottom: 32px;
+  `;
+  title.textContent = "Escolha a Pista";
+  el.appendChild(title);
+
+  const list = document.createElement("div");
+  list.style.cssText = "display: flex; flex-direction: column; gap: 16px;";
+  el.appendChild(list);
+
+  for (const map of maps) {
+    const button = document.createElement("button");
+    button.textContent = map.name;
+    button.style.cssText = `
+      font-family: ${RETRO_FONT}; font-size: 22px; font-weight: 700; letter-spacing: 2px;
+      text-transform: uppercase; padding: 14px 48px;
+      background: #1f5fb8; color: #fff; border: 3px solid #fff;
+      box-shadow: 4px 4px 0 #000; cursor: pointer;
+    `;
+    button.addEventListener("mouseenter", () => {
+      button.style.background = "#2a6fc9";
+    });
+    button.addEventListener("mouseleave", () => {
+      button.style.background = "#1f5fb8";
+    });
+    button.addEventListener("click", () => {
+      el.style.display = "none";
+      onSelect(map.id);
+    });
+    list.appendChild(button);
+  }
+
+  document.body.appendChild(el);
+}
+
+export interface CarOption {
+  id: string;
+  name: string;
+  color: number;
+}
+
+/** Tela de seleção de carro (cor), mesmo estilo retrô das outras telas. */
+export function createCarSelectScreen(cars: CarOption[], onSelect: (id: string) => void) {
+  const el = document.createElement("div");
+  el.style.cssText = `
+    position: fixed; inset: 0; background: #0b0b1a;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 30; font-family: ${RETRO_FONT}; color: #fff; text-align: center; gap: 8px;
+  `;
+
+  const checkerBar = document.createElement("div");
+  checkerBar.style.cssText = `
+    width: 340px; height: 20px; margin-bottom: 24px;
+    background-image: repeating-conic-gradient(#fff 0% 25%, #111 0% 50%);
+    background-size: 20px 20px;
+    border: 3px solid #fff;
+  `;
+  el.appendChild(checkerBar);
+
+  const title = document.createElement("div");
+  title.style.cssText = `
+    font-size: 34px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
+    color: #ffe14d; text-shadow: 3px 3px 0 #000; margin-bottom: 32px;
+  `;
+  title.textContent = "Escolha seu Carro";
+  el.appendChild(title);
+
+  const grid = document.createElement("div");
+  grid.style.cssText = "display: flex; flex-wrap: wrap; justify-content: center; gap: 16px; max-width: 480px;";
+  el.appendChild(grid);
+
+  for (const car of cars) {
+    const button = document.createElement("button");
+    button.style.cssText = `
+      font-family: ${RETRO_FONT}; font-size: 15px; font-weight: 700; letter-spacing: 1px;
+      text-transform: uppercase; padding: 16px 18px; width: 130px;
+      background: #14142b; color: #fff; border: 3px solid #fff;
+      box-shadow: 4px 4px 0 #000; cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; gap: 10px;
+    `;
+
+    const swatch = document.createElement("div");
+    swatch.style.cssText = `
+      width: 48px; height: 26px; background: ${colorToCss(car.color)};
+      border: 2px solid #fff; border-radius: 4px;
+    `;
+    button.appendChild(swatch);
+
+    const label = document.createElement("span");
+    label.textContent = car.name;
+    button.appendChild(label);
+
+    button.addEventListener("mouseenter", () => {
+      button.style.background = "#20203f";
+    });
+    button.addEventListener("mouseleave", () => {
+      button.style.background = "#14142b";
+    });
+    button.addEventListener("click", () => {
+      el.style.display = "none";
+      onSelect(car.id);
+    });
+    grid.appendChild(button);
+  }
+
+  document.body.appendChild(el);
+}
+
 export function createMobileControls(onChange: (state: MobileControlState) => void) {
   const state: MobileControlState = { throttle: false, brake: false, steer: 0 };
 

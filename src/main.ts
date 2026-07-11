@@ -1,5 +1,6 @@
 import * as THREE from "three";
-import { createTrack, ROAD_WIDTH, findNearestWaypoint } from "./track";
+import { createTrack, ROAD_WIDTH, findNearestWaypoint, TRACK_PRESETS } from "./track";
+import type { TrackConfig } from "./track";
 import { createCarMesh, CarController, AICarController } from "./car";
 import { resolveCarCollisions } from "./collision";
 import { RaceProgress, formatTime } from "./raceTimer";
@@ -11,6 +12,8 @@ import {
   createCountdownOverlay,
   createVictoryOverlay,
   createNameEntryScreen,
+  createMapSelectScreen,
+  createCarSelectScreen,
   createMinimap,
   createMobileControls,
   createPositionBadge,
@@ -22,7 +25,6 @@ const app = document.getElementById("app")!;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
-scene.fog = new THREE.Fog(0x87ceeb, 100, 380);
 
 const camera = new THREE.PerspectiveCamera(
   65,
@@ -48,20 +50,25 @@ window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-const sun = new THREE.DirectionalLight(0xffffff, 0.9);
-sun.position.set(60, 100, 40);
-sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.camera.left = -120;
-sun.shadow.camera.right = 120;
-sun.shadow.camera.top = 120;
-sun.shadow.camera.bottom = -120;
-sun.shadow.camera.near = 10;
-sun.shadow.camera.far = 300;
-scene.add(sun);
+function startGame(config: TrackConfig, carColor: number, playerName: string) {
+  // luz do dia (fraca à noite — os postes de luz viram a iluminação principal)
+  scene.add(new THREE.AmbientLight(0xffffff, config.night ? 0.15 : 0.6));
+  const sun = new THREE.DirectionalLight(0xffffff, config.night ? 0.08 : 0.9);
+  sun.position.set(60, 100, 40);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.left = -120;
+  sun.shadow.camera.right = 120;
+  sun.shadow.camera.top = 120;
+  sun.shadow.camera.bottom = -120;
+  sun.shadow.camera.near = 10;
+  sun.shadow.camera.far = 300;
+  scene.add(sun);
 
-const { startPosition, waypoints } = createTrack(scene);
+  scene.background = new THREE.Color(config.night ? 0x0a0e1f : 0x87ceeb);
+  scene.fog = new THREE.Fog(config.night ? 0x0a0e1f : 0x87ceeb, config.night ? 60 : 100, config.night ? 220 : 380);
+
+  const { startPosition, waypoints } = createTrack(scene, config);
 
 function closestWaypointIndex(position: THREE.Vector3): number {
   let best = 0;
@@ -107,7 +114,7 @@ function gridPosition(slot: number): THREE.Vector3 {
     .add(forward.clone().multiplyScalar(-row * GRID_ROW_SPACING));
 }
 
-const carMesh = createCarMesh();
+const carMesh = createCarMesh(carColor);
 carMesh.position.copy(gridPosition(0));
 carMesh.rotation.y = startHeading;
 scene.add(carMesh);
@@ -145,7 +152,7 @@ const aiCars: AICarController[] = aiColors.map((color, i) => {
 const racers: Racer[] = [
   {
     label: "JOGADOR",
-    color: 0xe8e8e8,
+    color: carColor,
     isPlayer: true,
     controller: car,
     progress: new RaceProgress(waypoints, startIdx, startIdx),
@@ -201,12 +208,10 @@ let lastOnTrackPosition = carMesh.position.clone();
 let lastOnTrackHeading = car.heading;
 let offTrackTimer = 0;
 
-createNameEntryScreen((name) => {
-  playerRacer.label = name;
-  countdownOverlay.start(() => {
-    raceStarted = true;
-    racers.forEach((r) => r.progress.resetLapClock());
-  });
+playerRacer.label = playerName;
+countdownOverlay.start(() => {
+  raceStarted = true;
+  racers.forEach((r) => r.progress.resetLapClock());
 });
 
 const clock = new THREE.Clock();
@@ -317,6 +322,29 @@ function animate() {
   );
 
   renderer.render(scene, camera);
+  }
+
+  animate();
 }
 
-animate();
+const CAR_OPTIONS = [
+  { id: "branco", name: "Branco", color: 0xe8e8e8 },
+  { id: "vermelho", name: "Vermelho", color: 0xd4342c },
+  { id: "azul", name: "Azul", color: 0x2266ee },
+  { id: "amarelo", name: "Amarelo", color: 0xeedd22 },
+  { id: "verde", name: "Verde", color: 0x22aa66 },
+  { id: "preto", name: "Preto", color: 0x1a1a1a },
+];
+
+createMapSelectScreen(
+  TRACK_PRESETS.map((p) => ({ id: p.id, name: p.name })),
+  (mapId) => {
+    const config = TRACK_PRESETS.find((p) => p.id === mapId) ?? TRACK_PRESETS[0];
+    createCarSelectScreen(CAR_OPTIONS, (carId) => {
+      const carOption = CAR_OPTIONS.find((c) => c.id === carId) ?? CAR_OPTIONS[0];
+      createNameEntryScreen((name) => {
+        startGame(config, carOption.color, name);
+      });
+    });
+  }
+);

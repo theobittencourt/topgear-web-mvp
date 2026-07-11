@@ -28,6 +28,63 @@ export function elevationAt(x: number, z: number): number {
 
 export const ROAD_WIDTH = 24;
 
+/** Configuração de um mapa — permite ter vários circuitos diferentes reaproveitando o mesmo gerador. */
+export interface TrackConfig {
+  id: string;
+  name: string;
+  outerW: number;
+  outerH: number;
+  roadWidth: number;
+  cornerRadius: number;
+  hasTunnel: boolean;
+  night: boolean;
+  roadColor: number;
+  foliageColors: number[];
+  billboards: boolean;
+}
+
+export const TRACK_PRESETS: TrackConfig[] = [
+  {
+    id: "estadio",
+    name: "Estádio Clássico",
+    outerW: 210,
+    outerH: 140,
+    roadWidth: ROAD_WIDTH,
+    cornerRadius: 46,
+    hasTunnel: true,
+    night: false,
+    roadColor: 0x2d4a44,
+    foliageColors: [0x2f7a3d, 0x357a42, 0x2a6b36, 0x3d8a4a, 0x276b38, 0x4a9456],
+    billboards: false,
+  },
+  {
+    id: "litoral",
+    name: "Circuito Litoral",
+    outerW: 260,
+    outerH: 120,
+    roadWidth: ROAD_WIDTH,
+    cornerRadius: 40,
+    hasTunnel: false,
+    night: false,
+    roadColor: 0x3a4a4a,
+    foliageColors: [0x3d8a4a, 0x4a9456, 0x357a42],
+    billboards: true,
+  },
+  {
+    id: "noturno",
+    name: "Circuito Noturno",
+    outerW: 190,
+    outerH: 130,
+    roadWidth: ROAD_WIDTH,
+    cornerRadius: 42,
+    hasTunnel: true,
+    night: true,
+    roadColor: 0x232f30,
+    foliageColors: [0x1e4a28, 0x224f2c, 0x1a3f22],
+    billboards: true,
+  },
+];
+
 /**
  * Acha o waypoint (ponto do centro da pista) mais próximo de (x,z). Usado tanto pra saber a
  * altura correta do carro (em vez de recalcular a fórmula de elevação na posição bruta do carro,
@@ -290,6 +347,33 @@ function buildStripedRing(
   return mesh;
 }
 
+/** Textura de painel de patrocínio com o texto (placeholder — depois dá pra trocar por logo real). */
+function createBillboardTexture(text: string): THREE.Texture {
+  const width = 512;
+  const height = 200;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d")!;
+
+  const bgColors = ["#d4342c", "#1f5fb8", "#1f8f3d", "#e0a500", "#8a2be2"];
+  const bg = bgColors[Math.abs(text.length * 7) % bgColors.length];
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 8;
+  ctx.strokeRect(4, 4, width - 8, height - 8);
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 56px 'Courier New', monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, width / 2, height / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  return texture;
+}
+
 function createCheckeredTexture(): THREE.Texture {
   const size = 64;
   const canvas = document.createElement("canvas");
@@ -357,21 +441,21 @@ function createMountain(height: number, width: number, color: number): THREE.Mes
   return mountain;
 }
 
-export function createTrack(scene: THREE.Scene) {
-  // grama
+export function createTrack(scene: THREE.Scene, config: TrackConfig = TRACK_PRESETS[0]) {
+  // grama (mais escura no modo noturno)
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(700, 700),
-    new THREE.MeshStandardMaterial({ color: 0x2d6a2f })
+    new THREE.MeshStandardMaterial({ color: config.night ? 0x11241a : 0x2d6a2f })
   );
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = -0.01;
   ground.receiveShadow = true;
   scene.add(ground);
 
-  const outerW = 210;
-  const outerH = 140;
-  const roadWidth = ROAD_WIDTH;
-  const cornerRadius = 46;
+  const outerW = config.outerW;
+  const outerH = config.outerH;
+  const roadWidth = config.roadWidth;
+  const cornerRadius = config.cornerRadius;
 
   const innerW = outerW - roadWidth * 2;
   const innerH = outerH - roadWidth * 2;
@@ -394,7 +478,7 @@ export function createTrack(scene: THREE.Scene) {
 
   // asfalto verde-petróleo, tipo o Top Gear do SNES (não é cinza puro)
   const roadMaterial = new THREE.MeshStandardMaterial({
-    color: 0x2d4a44,
+    color: config.roadColor,
     roughness: 0.95,
     metalness: 0,
     side: THREE.DoubleSide,
@@ -434,7 +518,7 @@ export function createTrack(scene: THREE.Scene) {
   const lampHeadMaterial = new THREE.MeshStandardMaterial({
     color: 0xfff2b0,
     emissive: 0xffdd66,
-    emissiveIntensity: 1,
+    emissiveIntensity: config.night ? 2 : 1,
   });
   for (let i = 0; i < outerSidewalkPts.length; i += 8) {
     const p = outerSidewalkPts[i];
@@ -446,6 +530,11 @@ export function createTrack(scene: THREE.Scene) {
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 6), lampHeadMaterial);
     head.position.y = 5.1;
     lampGroup.add(head);
+    if (config.night) {
+      const lampLight = new THREE.PointLight(0xffdd88, 8, 22, 2);
+      lampLight.position.y = 5.1;
+      lampGroup.add(lampLight);
+    }
     lampGroup.position.set(p.x, elevation[i], p.y);
     scene.add(lampGroup);
   }
@@ -464,7 +553,7 @@ export function createTrack(scene: THREE.Scene) {
   const tunnelA = tunnelStartIdx + TUNNEL_MARGIN;
   const tunnelB = tunnelEndIdx - TUNNEL_MARGIN;
 
-  if (tunnelStartIdx !== -1 && tunnelB > tunnelA) {
+  if (config.hasTunnel && tunnelStartIdx !== -1 && tunnelB > tunnelA) {
     const TUNNEL_HEIGHT = 10;
     const tunnelOuterPts = outerEdgePts.slice(tunnelA, tunnelB + 1);
     const tunnelInnerPts = innerEdgePts.slice(tunnelA, tunnelB + 1);
@@ -557,8 +646,35 @@ export function createTrack(scene: THREE.Scene) {
   stand.receiveShadow = true;
   scene.add(stand);
 
+  // painéis de patrocínio ao redor da pista (opcional por mapa)
+  if (config.billboards) {
+    const sponsorNames = ["TURBO COLA", "NOS RACING", "ACME PNEUS", "VELOX FUEL", "APEX TECH"];
+    const billboardPts = stadiumShape(outerW + 20, outerH + 20, cornerRadius + 10).getSpacedPoints(60);
+    billboardPts.forEach((p, i) => {
+      if (i % 6 !== 0) return;
+      const texture = createBillboardTexture(sponsorNames[(i / 6) % sponsorNames.length]);
+      const billboard = new THREE.Mesh(
+        new THREE.PlaneGeometry(10, 4),
+        new THREE.MeshStandardMaterial({ map: texture, side: THREE.DoubleSide })
+      );
+      const next = billboardPts[(i + 1) % billboardPts.length];
+      const heading = Math.atan2(next.x - p.x, next.y - p.y);
+      billboard.position.set(p.x, 5, p.y);
+      billboard.rotation.y = heading;
+
+      // postes de sustentação
+      const postMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
+      for (const side of [-4, 4]) {
+        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 6, 6), postMaterial);
+        post.position.set(side, -2, 0);
+        billboard.add(post);
+      }
+      scene.add(billboard);
+    });
+  }
+
   // árvores ao redor da pista — vários anéis (perto, médio, longe) pra dar densidade e profundidade
-  const foliageColors = [0x2f7a3d, 0x357a42, 0x2a6b36, 0x3d8a4a, 0x276b38, 0x4a9456];
+  const foliageColors = config.foliageColors;
   function scatterTrees(ringOffset: number, pointCount: number, everyN: number, jitterRange: number) {
     const pts = stadiumShape(outerW + ringOffset, outerH + ringOffset, cornerRadius + ringOffset / 2).getSpacedPoints(
       pointCount
@@ -623,5 +739,6 @@ export function createTrack(scene: THREE.Scene) {
   return {
     startPosition,
     waypoints,
+    night: config.night,
   };
 }

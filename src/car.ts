@@ -1,11 +1,11 @@
 import * as THREE from "three";
 import { elevationAt } from "./track";
 
-export function createCarMesh(): THREE.Group {
+export function createCarMesh(bodyColor: number = 0xe8e8e8): THREE.Group {
   const group = new THREE.Group();
 
   const bodyMaterial = new THREE.MeshStandardMaterial({
-    color: 0xe8e8e8,
+    color: bodyColor,
     metalness: 0.5,
     roughness: 0.3,
   });
