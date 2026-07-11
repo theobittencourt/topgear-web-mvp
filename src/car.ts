@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { elevationAt, sampleTrackElevation } from "./track";
+import { elevationAt } from "./track";
 
 export function createCarMesh(): THREE.Group {
   const group = new THREE.Group();
@@ -118,10 +118,10 @@ export class CarController {
   /** velocidade lateral de empurrão (bump), independente da velocidade de condução */
   bumpVelocity = new THREE.Vector2(0, 0);
 
-  readonly maxSpeed = 28;
-  readonly maxReverseSpeed = -10;
-  readonly acceleration = 14;
-  readonly brakeDeceleration = 24;
+  readonly maxSpeed = 38;
+  readonly maxReverseSpeed = -12;
+  readonly acceleration = 18;
+  readonly brakeDeceleration = 26;
   readonly friction = 6;
   readonly turnSpeed = 2.2;
 
@@ -154,14 +154,10 @@ export class CarController {
     this.mesh.position.x += Math.sin(this.heading) * this.speed * dt + this.bumpVelocity.x * dt;
     this.mesh.position.z += Math.cos(this.heading) * this.speed * dt + this.bumpVelocity.y * dt;
 
-    // usa a altura suave da pista (interpolada entre waypoints vizinhos) em vez de recalcular a
-    // fórmula de elevação na posição bruta do carro — que diverge da pista quando ele não está
-    // exatamente no centro (perto da borda, por exemplo)
-    if (this.waypoints) {
-      this.mesh.position.y = sampleTrackElevation(this.mesh.position.x, this.mesh.position.z, this.waypoints);
-    } else {
-      this.mesh.position.y = elevationAt(this.mesh.position.x, this.mesh.position.z);
-    }
+    // a fórmula de elevação varia devagar (poucas subidas/descidas por volta), então calcular
+    // direto na posição do carro já é preciso — sem tabela de busca por waypoint (que tinha bugs
+    // de "pular de trecho" nas curvas mais fechadas)
+    this.mesh.position.y = elevationAt(this.mesh.position.x, this.mesh.position.z);
     this.mesh.rotation.y = this.heading;
 
     // o empurrão de colisão decai rápido, tipo bumper car

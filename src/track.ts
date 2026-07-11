@@ -1,22 +1,32 @@
 import * as THREE from "three";
 
-const HILL_AMP_1 = 4;
-const HILL_AMP_2 = 1.2;
+const HILL_AMP_1 = 5;
+const HILL_AMP_2 = 1.5;
 // desloca a onda pra cima, então a elevação nunca fica negativa (nunca afunda em relação à grama)
 const HILL_OFFSET = HILL_AMP_1 + HILL_AMP_2;
 
-/** Elevação do terreno/pista em função do ângulo ao redor do centro da pista (cria subidas e descidas). */
+/**
+ * Elevação do terreno/pista em função do ângulo ao redor do centro da pista (cria subidas e
+ * descidas). Frequência baixa de propósito (1 subida+descida grande por volta, mais 2 menores por
+ * cima) — com muitas subidas/descidas curtas, a elevação varia rápido demais em relação à largura
+ * da pista, e qualquer aproximação fica sensível o bastante pra parecer que o carro afunda.
+ *
+ * IMPORTANTE: os multiplicadores de frequência (1 e 2) precisam ser números INTEIROS de ciclos
+ * por volta. Com um valor não-inteiro (tipo 1.5), a função não fecha o ciclo exatamente onde a
+ * pista dá a volta completa (t=0 e t=1 têm que dar o mesmo valor) — sobra um salto discreto de
+ * elevação bem naquele ponto da pista, e o carro literalmente "teleporta" pra cima/baixo ali.
+ */
 export function elevationAt(x: number, z: number): number {
   const theta = Math.atan2(z, x);
   const t = (theta + Math.PI) / (Math.PI * 2);
   return (
-    Math.sin(t * Math.PI * 4) * HILL_AMP_1 +
-    Math.sin(t * Math.PI * 10 + 1.7) * HILL_AMP_2 +
+    Math.sin(t * Math.PI * 2 * 1) * HILL_AMP_1 +
+    Math.sin(t * Math.PI * 2 * 2 + 1.7) * HILL_AMP_2 +
     HILL_OFFSET
   );
 }
 
-export const ROAD_WIDTH = 18;
+export const ROAD_WIDTH = 24;
 
 /**
  * Acha o waypoint (ponto do centro da pista) mais próximo de (x,z). Usado tanto pra saber a
@@ -44,41 +54,11 @@ export function findNearestWaypoint(
 }
 
 /**
- * Altura suave da pista em (x,z): acha o waypoint mais próximo e projeta a posição no segmento
- * vizinho (anterior ou seguinte, o que estiver mais perto) pra interpolar a elevação entre os
- * dois. Usar só a altura do waypoint mais próximo faz o carro "pular" toda vez que o waypoint
- * mais próximo muda — como andar em paralelepípedo.
- */
-export function sampleTrackElevation(x: number, z: number, waypoints: THREE.Vector3[]): number {
-  const { index } = findNearestWaypoint(x, z, waypoints);
-  const n = waypoints.length;
-  const prev = waypoints[(index - 1 + n) % n];
-  const curr = waypoints[index];
-  const next = waypoints[(index + 1) % n];
-
-  function projectOnSegment(a: THREE.Vector3, b: THREE.Vector3) {
-    const abx = b.x - a.x;
-    const abz = b.z - a.z;
-    const lenSq = abx * abx + abz * abz;
-    let t = lenSq > 0 ? ((x - a.x) * abx + (z - a.z) * abz) / lenSq : 0;
-    t = THREE.MathUtils.clamp(t, 0, 1);
-    const px = a.x + abx * t;
-    const pz = a.z + abz * t;
-    const dist = Math.hypot(x - px, z - pz);
-    return { t, dist, elevation: THREE.MathUtils.lerp(a.y, b.y, t) };
-  }
-
-  const segA = projectOnSegment(prev, curr);
-  const segB = projectOnSegment(curr, next);
-
-  return segA.dist <= segB.dist ? segA.elevation : segB.elevation;
-}
-
-/**
- * Calcula UMA elevação por índice (usando o ponto médio entre a borda externa e interna da
- * pista naquele índice), pra usar nos dois lados da fita — se cada borda calculasse sua própria
- * elevação separadamente, a pista ficava torta (a elevação depende do ângulo, e as duas bordas
- * têm ângulos ligeiramente diferentes, o que também desalinhava com a altura real do carro).
+ * Calcula UMA elevação por índice (ponto médio entre a borda externa e interna), pra usar nos
+ * dois lados da fita — se cada borda calculasse a sua separadamente, a pista ficava torta.
+ * Agora que `elevationAt` varia bem devagar (poucas subidas/descidas por volta), calcular a
+ * fórmula direto no ponto médio já é preciso o bastante — nada de tabela de busca por waypoint,
+ * que era sensível a bugs de "pular de trecho" nas curvas.
  */
 function buildElevationProfile(outerPts: THREE.Vector2[], innerPts: THREE.Vector2[]): number[] {
   const n = Math.min(outerPts.length, innerPts.length);
@@ -397,15 +377,26 @@ export function createTrack(scene: THREE.Scene) {
   const innerH = outerH - roadWidth * 2;
   const innerR = Math.max(cornerRadius - roadWidth, 1);
 
+  // waypoints do centro da pista — calculados JÁ AQUI (antes da malha) pra servir de referência
+  // única de elevação, tanto pra malha quanto pro carro (ver comentário em buildElevationProfile)
+  const centerW = outerW - roadWidth;
+  const centerH = outerH - roadWidth;
+  const centerR = Math.max(cornerRadius - roadWidth / 2, 1);
+  const centerlinePts = stadiumShape(centerW, centerH, centerR).getSpacedPoints(110);
+  const centerlineElevation = centerlinePts.map((p) => elevationAt(p.x, p.y));
+  const waypoints = centerlinePts.map((p, i) => new THREE.Vector3(p.x, centerlineElevation[i], p.y));
+
   // pontos em alta resolução das bordas da pista (usados pro asfalto E pro meio-fio,
   // garantindo elevação suave e encaixe perfeito entre eles)
   const outerEdgePts = stadiumShape(outerW, outerH, cornerRadius).getSpacedPoints(120);
   const innerEdgePts = stadiumShape(innerW, innerH, innerR).getSpacedPoints(120);
   const elevation = buildElevationProfile(outerEdgePts, innerEdgePts);
 
+  // asfalto verde-petróleo, tipo o Top Gear do SNES (não é cinza puro)
   const roadMaterial = new THREE.MeshStandardMaterial({
-    color: 0x363636,
-    roughness: 0.9,
+    color: 0x2d4a44,
+    roughness: 0.95,
+    metalness: 0,
     side: THREE.DoubleSide,
   });
   scene.add(buildRibbon(outerEdgePts, innerEdgePts, elevation, 0, roadMaterial));
@@ -421,10 +412,43 @@ export function createTrack(scene: THREE.Scene) {
   ).getSpacedPoints(120);
   scene.add(buildStripedRing(innerEdgePts, innerCurbPts, elevation, 0.01, 3));
 
+  // calçada de concreto entre o meio-fio e a grama, tipo circuito urbano retrô
+  const sidewalkMaterial = new THREE.MeshStandardMaterial({ color: 0xb9b6a8, roughness: 1, side: THREE.DoubleSide });
+  const outerSidewalkPts = stadiumShape(outerW + 12, outerH + 12, cornerRadius + 6).getSpacedPoints(120);
+  scene.add(buildRibbon(outerSidewalkPts, outerCurbPts, elevation, 0.005, sidewalkMaterial));
+
+  const innerSidewalkPts = stadiumShape(
+    Math.max(innerW - 12, 1),
+    Math.max(innerH - 12, 1),
+    Math.max(innerR - 6, 0.5)
+  ).getSpacedPoints(120);
+  scene.add(buildRibbon(innerCurbPts, innerSidewalkPts, elevation, 0.005, sidewalkMaterial));
+
   // "saias" fechando o vão entre a pista elevada e a grama (evita buracos/flutuação visual)
   const skirtMaterial = new THREE.MeshStandardMaterial({ color: 0x6b6459, roughness: 1, side: THREE.DoubleSide });
-  scene.add(buildSkirt(outerCurbPts, elevation, 0.01, -0.01, skirtMaterial));
-  scene.add(buildSkirt(innerCurbPts, elevation, 0.01, -0.01, skirtMaterial));
+  scene.add(buildSkirt(outerSidewalkPts, elevation, 0.005, -0.01, skirtMaterial));
+  scene.add(buildSkirt(innerSidewalkPts, elevation, 0.005, -0.01, skirtMaterial));
+
+  // postes de luz ao longo da calçada externa, tipo circuito urbano retrô
+  const lampPoleMaterial = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.8 });
+  const lampHeadMaterial = new THREE.MeshStandardMaterial({
+    color: 0xfff2b0,
+    emissive: 0xffdd66,
+    emissiveIntensity: 1,
+  });
+  for (let i = 0; i < outerSidewalkPts.length; i += 8) {
+    const p = outerSidewalkPts[i];
+    const lampGroup = new THREE.Group();
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.18, 5, 6), lampPoleMaterial);
+    pole.position.y = 2.5;
+    pole.castShadow = true;
+    lampGroup.add(pole);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 6), lampHeadMaterial);
+    head.position.y = 5.1;
+    lampGroup.add(head);
+    lampGroup.position.set(p.x, elevation[i], p.y);
+    scene.add(lampGroup);
+  }
 
   // túnel bem comprido na reta de cima (oposta à largada) — acha o trecho reto onde z é máximo
   const topStraightZ = outerH / 2;
@@ -497,14 +521,6 @@ export function createTrack(scene: THREE.Scene) {
     placePortal(tunnelA);
     placePortal(tunnelB);
   }
-
-  const centerW = outerW - roadWidth;
-  const centerH = outerH - roadWidth;
-  const centerR = Math.max(cornerRadius - roadWidth / 2, 1);
-  const centerlineShape = stadiumShape(centerW, centerH, centerR);
-  const waypoints = centerlineShape
-    .getSpacedPoints(110)
-    .map((p) => new THREE.Vector3(p.x, elevationAt(p.x, p.y), p.y));
 
   // linha central tracejada
   const dashMaterial = new THREE.MeshStandardMaterial({ color: 0xf2f2f2 });

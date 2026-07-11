@@ -92,27 +92,48 @@ const startIdx = closestWaypointIndex(startPosition);
 const startHeading = headingTowards(startPosition, waypoints[(startIdx + 1) % waypoints.length]);
 // vetor lateral (perpendicular ao sentido da pista) pra alinhar os carros lado a lado na largada
 const lateral = new THREE.Vector3(Math.cos(startHeading), 0, -Math.sin(startHeading));
-const gridOffsets = [-6, -2, 2, 6];
+const forward = new THREE.Vector3(Math.sin(startHeading), 0, Math.cos(startHeading));
 
-function gridPosition(offset: number): THREE.Vector3 {
-  return startPosition.clone().add(lateral.clone().multiplyScalar(offset));
+// grid em duas colunas x várias fileiras (não cabem 10 carros lado a lado numa pista só)
+const GRID_COLS = [-6, 6];
+const GRID_ROW_SPACING = 7;
+
+function gridPosition(slot: number): THREE.Vector3 {
+  const col = GRID_COLS[slot % GRID_COLS.length];
+  const row = Math.floor(slot / GRID_COLS.length);
+  return startPosition
+    .clone()
+    .add(lateral.clone().multiplyScalar(col))
+    .add(forward.clone().multiplyScalar(-row * GRID_ROW_SPACING));
 }
 
 const carMesh = createCarMesh();
-carMesh.position.copy(gridPosition(gridOffsets[0]));
+carMesh.position.copy(gridPosition(0));
 carMesh.rotation.y = startHeading;
 scene.add(carMesh);
 
 const car = new CarController(carMesh, waypoints);
 car.heading = startHeading;
 
-const aiColors = [0x2266ee, 0xeedd22, 0x22aa66];
-const aiNames = ["Bot Azul", "Bot Amarelo", "Bot Verde"];
-const aiCruiseThrottles = [0.88, 0.94, 1.0];
+const aiColors = [
+  0x2266ee, 0xeedd22, 0x22aa66, 0x9b30d9, 0xff8c1a, 0xff4fa3, 0x22c2c2, 0x8a5a2b, 0x9aa0a6,
+];
+const aiNames = [
+  "Bot Azul",
+  "Bot Amarelo",
+  "Bot Verde",
+  "Bot Roxo",
+  "Bot Laranja",
+  "Bot Rosa",
+  "Bot Ciano",
+  "Bot Marrom",
+  "Bot Cinza",
+];
+const aiCruiseThrottles = [0.88, 0.94, 1.0, 0.8, 0.86, 0.9, 0.96, 0.83, 0.78];
 const aiCars: AICarController[] = aiColors.map((color, i) => {
   const mesh = createCarMesh();
   (mesh.children[0] as THREE.Mesh).material = new THREE.MeshStandardMaterial({ color });
-  mesh.position.copy(gridPosition(gridOffsets[i + 1]));
+  mesh.position.copy(gridPosition(i + 1));
   mesh.rotation.y = startHeading;
   scene.add(mesh);
 
