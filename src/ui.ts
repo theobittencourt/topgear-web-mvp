@@ -402,6 +402,71 @@ export interface MobileControlState {
   steer: number;
 }
 
+/**
+ * Tela de loading estilo SNES — mostrada logo antes de montar a pista (que é um trabalho síncrono
+ * pesado: gera todas as árvores, montanhas, nuvens, meio-fio etc. de uma vez, travando a tela por
+ * um instante sem feedback nenhum). Chame `show()`, espere o próximo frame renderizar (por isso o
+ * `requestAnimationFrame` duplo em quem usa isso), e só então rode o trabalho pesado.
+ */
+export function createLoadingScreen() {
+  const el = document.createElement("div");
+  el.style.cssText = `
+    position: fixed; inset: 0; background: #0b0b1a;
+    display: none; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 35; font-family: ${RETRO_FONT}; color: #fff; text-align: center; gap: 8px;
+  `;
+
+  const checkerBar = document.createElement("div");
+  checkerBar.style.cssText = `
+    width: 340px; height: 20px; margin-bottom: 32px;
+    background-image: repeating-conic-gradient(#fff 0% 25%, #111 0% 50%);
+    background-size: 20px 20px;
+    border: 3px solid #fff;
+  `;
+  el.appendChild(checkerBar);
+
+  const title = document.createElement("div");
+  title.style.cssText = `
+    font-size: 30px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
+    color: #ffe14d; text-shadow: 3px 3px 0 #000; margin-bottom: 28px;
+  `;
+  title.textContent = "Carregando...";
+  el.appendChild(title);
+
+  // barrinha de progresso "falsa" (indeterminada), só animação, estilo carregamento de cartucho
+  const barTrack = document.createElement("div");
+  barTrack.style.cssText = `
+    width: 280px; height: 22px; border: 3px solid #fff; background: #14142b;
+    box-shadow: 4px 4px 0 #000; overflow: hidden; position: relative;
+  `;
+  const barFill = document.createElement("div");
+  barFill.style.cssText = `
+    position: absolute; top: 0; bottom: 0; width: 40%; background: #d4342c;
+    animation: loadingBarMove 1s linear infinite;
+  `;
+  const styleTag = document.createElement("style");
+  styleTag.textContent = `
+    @keyframes loadingBarMove {
+      0% { left: -40%; }
+      100% { left: 100%; }
+    }
+  `;
+  document.head.appendChild(styleTag);
+  barTrack.appendChild(barFill);
+  el.appendChild(barTrack);
+
+  document.body.appendChild(el);
+
+  return {
+    show() {
+      el.style.display = "flex";
+    },
+    hide() {
+      el.style.display = "none";
+    },
+  };
+}
+
 export function createNameEntryScreen(onStart: (name: string) => void) {
   const savedName = localStorage.getItem(PLAYER_NAME_STORAGE_KEY) ?? "";
 

@@ -14,6 +14,7 @@ import {
   createNameEntryScreen,
   createMapSelectScreen,
   createCarSelectScreen,
+  createLoadingScreen,
   createMinimap,
   createMobileControls,
   createPositionBadge,
@@ -336,6 +337,8 @@ const CAR_OPTIONS = [
   { id: "preto", name: "Preto", color: 0x1a1a1a },
 ];
 
+const loadingScreen = createLoadingScreen();
+
 createMapSelectScreen(
   TRACK_PRESETS.map((p) => ({ id: p.id, name: p.name })),
   (mapId) => {
@@ -343,7 +346,16 @@ createMapSelectScreen(
     createCarSelectScreen(CAR_OPTIONS, (carId) => {
       const carOption = CAR_OPTIONS.find((c) => c.id === carId) ?? CAR_OPTIONS[0];
       createNameEntryScreen((name) => {
-        startGame(config, carOption.color, name);
+        loadingScreen.show();
+        // espera dois frames pra garantir que a tela de loading realmente pintou antes de travar
+        // a thread principal com o trabalho síncrono pesado de montar a pista (árvores, montanhas,
+        // meio-fio etc.)
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            startGame(config, carOption.color, name);
+            loadingScreen.hide();
+          });
+        });
       });
     });
   }

@@ -518,7 +518,7 @@ export function createTrack(scene: THREE.Scene, config: TrackConfig = TRACK_PRES
   const lampHeadMaterial = new THREE.MeshStandardMaterial({
     color: 0xfff2b0,
     emissive: 0xffdd66,
-    emissiveIntensity: config.night ? 2 : 1,
+    emissiveIntensity: config.night ? 6 : 1,
   });
   for (let i = 0; i < outerSidewalkPts.length; i += 8) {
     const p = outerSidewalkPts[i];
@@ -531,7 +531,8 @@ export function createTrack(scene: THREE.Scene, config: TrackConfig = TRACK_PRES
     head.position.y = 5.1;
     lampGroup.add(head);
     if (config.night) {
-      const lampLight = new THREE.PointLight(0xffdd88, 8, 22, 2);
+      // intensidade bem alta e decay baixo (1) pra clarear de verdade um trecho grande da pista
+      const lampLight = new THREE.PointLight(0xffdd88, 120, 45, 1);
       lampLight.position.y = 5.1;
       lampGroup.add(lampLight);
     }
@@ -574,11 +575,12 @@ export function createTrack(scene: THREE.Scene, config: TrackConfig = TRACK_PRES
     scene.add(buildWall(tunnelInnerPts, tunnelElevation, 0, TUNNEL_HEIGHT, tunnelWallMaterial));
     scene.add(buildRibbon(tunnelOuterPts, tunnelInnerPts, tunnelElevation, TUNNEL_HEIGHT, tunnelRoofMaterial));
 
-    // luzes de teto (caixinhas emissivas), tipo luminárias de túnel
+    // luzes de teto (caixinhas emissivas + luz de verdade), tipo luminárias de túnel — o túnel é
+    // fechado, então fica escuro demais sem uma fonte de luz própria, principalmente à noite
     const tunnelLightMaterial = new THREE.MeshStandardMaterial({
       color: 0xfff2b0,
       emissive: 0xffdd66,
-      emissiveIntensity: 1.3,
+      emissiveIntensity: config.night ? 5 : 2.5,
     });
     for (let i = tunnelA + 2; i < tunnelB - 2; i += 4) {
       const outerPt = outerEdgePts[i];
@@ -591,6 +593,10 @@ export function createTrack(scene: THREE.Scene, config: TrackConfig = TRACK_PRES
       light.position.set(cx, elevation[i] + TUNNEL_HEIGHT - 0.35, cz);
       light.rotation.y = heading;
       scene.add(light);
+
+      const tunnelPointLight = new THREE.PointLight(0xffdd88, config.night ? 90 : 45, 30, 1.3);
+      tunnelPointLight.position.set(cx, elevation[i] + TUNNEL_HEIGHT - 1, cz);
+      scene.add(tunnelPointLight);
     }
 
     // portais de concreto nas duas pontas do túnel
