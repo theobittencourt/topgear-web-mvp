@@ -728,8 +728,10 @@ export function createMobileControls(onChange: (state: MobileControlState) => vo
   // pointer-events só nos widgets de verdade (não no wrapper inteiro) — senão a área vazia do
   // meio da tela bloqueava cliques em telas por baixo, tipo o botão "Reiniciar" da vitória
   const steeringCard = document.createElement("div");
+  // o tamanho considera vw E vh — só vw deixava o controle enorme no modo paisagem, onde a
+  // altura da tela é bem menor (mesmo width em px vira uma fração muito maior da tela)
   steeringCard.style.cssText = `
-    width: min(34vw, 210px); min-width: 180px; height: min(34vw, 210px);
+    width: min(34vw, 34vh, 190px); height: min(34vw, 34vh, 190px);
     background: #14142b; border: 3px solid #fff; box-shadow: 5px 5px 0 #000;
     position: relative; overflow: hidden; touch-action: none; pointer-events: auto;
     display: flex; align-items: center; justify-content: center;
@@ -811,7 +813,7 @@ export function createMobileControls(onChange: (state: MobileControlState) => vo
   const rightPanel = document.createElement("div");
   rightPanel.style.cssText = `
     display: flex; gap: 12px; align-items: center; justify-content: flex-end;
-    width: min(34vw, 190px); min-width: 160px; pointer-events: auto;
+    width: min(34vw, 34vh, 170px); pointer-events: auto;
   `;
 
   // triângulo desenhado só com borda CSS — não usa glifo de texto (▲/▼), que em alguns
@@ -831,7 +833,8 @@ export function createMobileControls(onChange: (state: MobileControlState) => vo
   function createActionButton(direction: "up" | "down", color: string) {
     const button = document.createElement("div");
     button.style.cssText = `
-      width: 72px; height: 72px; display: flex; align-items: center;
+      width: min(18vw, 16vh, 72px); height: min(18vw, 16vh, 72px);
+      display: flex; align-items: center;
       justify-content: center; background: ${color};
       border: 3px solid #fff; box-shadow: 4px 4px 0 #000;
       user-select: none; touch-action: none; transition: transform 0.1s ease;
