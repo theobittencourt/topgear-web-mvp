@@ -654,17 +654,32 @@ export function createTrack(scene: THREE.Scene, config: TrackConfig = TRACK_PRES
 
   // painéis de patrocínio ao redor da pista (opcional por mapa)
   if (config.billboards) {
-    const sponsorNames = ["TURBO COLA", "NOS RACING", "ACME PNEUS", "VELOX FUEL", "APEX TECH"];
+    const sponsorNames = [
+      "TURBO COLA",
+      "NOS RACING",
+      "ACME PNEUS",
+      "VELOX FUEL",
+      "APEX TECH",
+      "RAIO ENERGY",
+      "SKID WEAR",
+      "NITRO BANK",
+      "GRID SPORT",
+      "OCTANO+",
+    ];
     const billboardPts = stadiumShape(outerW + 20, outerH + 20, cornerRadius + 10).getSpacedPoints(60);
     billboardPts.forEach((p, i) => {
-      if (i % 6 !== 0) return;
-      const texture = createBillboardTexture(sponsorNames[(i / 6) % sponsorNames.length]);
+      if (i % 3 !== 0) return;
+      const texture = createBillboardTexture(sponsorNames[(i / 3) % sponsorNames.length]);
       const billboard = new THREE.Mesh(
         new THREE.PlaneGeometry(10, 4),
         new THREE.MeshStandardMaterial({ map: texture, side: THREE.DoubleSide })
       );
-      const next = billboardPts[(i + 1) % billboardPts.length];
-      const heading = Math.atan2(next.x - p.x, next.y - p.y);
+
+      // aponta o painel pro ponto correspondente da pista (não na direção do percurso) — assim
+      // o lado com o texto fica de frente pra quem tá dirigindo, em vez de "de perfil"
+      const targetIdx = Math.floor((i / billboardPts.length) * outerEdgePts.length) % outerEdgePts.length;
+      const trackPoint = outerEdgePts[targetIdx];
+      const heading = Math.atan2(trackPoint.x - p.x, trackPoint.y - p.y);
       billboard.position.set(p.x, 5, p.y);
       billboard.rotation.y = heading;
 

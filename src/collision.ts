@@ -1,6 +1,8 @@
 import { CarController } from "./car";
 
-const CAR_RADIUS = 1.6;
+// o carro é bem mais comprido (4.4) do que largo (2.1) — um raio pequeno demais deixava os carros
+// "atravessarem" um no outro visualmente (o na frente/atrás) antes da física perceber a colisão.
+const CAR_RADIUS = 2.2;
 const PUSH_STRENGTH = 30;
 
 export function resolveCarCollisions(cars: CarController[]) {

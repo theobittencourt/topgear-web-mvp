@@ -193,7 +193,7 @@ const speedHud = createSpeedHud(car.maxSpeed * 6);
 const lapHud = createLapHud();
 const leaderboardHud = createLeaderboardHud(isMobileDevice);
 const minimap = createMinimap(waypoints);
-const positionBadge = createPositionBadge();
+const positionBadge = createPositionBadge(isMobileDevice);
 const lapBanner = createLapBanner();
 const countdownOverlay = createCountdownOverlay();
 const victoryOverlay = createVictoryOverlay(() => window.location.reload());

@@ -204,9 +204,16 @@ export function createMinimap(waypoints: { x: number; z: number }[]) {
 }
 
 /** Indicador grande de colocação (tipo "1ST"), canto inferior direito. */
-export function createPositionBadge() {
+export function createPositionBadge(mobile = false) {
   const el = document.createElement("div");
-  el.style.cssText = `
+  el.style.cssText = mobile
+    ? `
+    position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 10;
+    pointer-events: none;
+    font-family: ${RETRO_FONT}; font-weight: 700; font-style: italic; font-size: 34px;
+    color: #fff; text-shadow: 2px 2px 0 #000, -1px -1px 0 #ff3b3b; letter-spacing: 1px;
+  `
+    : `
     position: fixed; bottom: 20px; right: 20px; z-index: 10; pointer-events: none;
     font-family: ${RETRO_FONT}; font-weight: 700; font-style: italic; font-size: 58px;
     color: #fff; text-shadow: 3px 3px 0 #000, -2px -2px 0 #ff3b3b; letter-spacing: 1px;
@@ -261,8 +268,9 @@ export function createLapBanner() {
   const inner = document.createElement("div");
   inner.style.cssText = `
     background: #d4342c; color: #fff; border: 4px solid #fff; box-shadow: 6px 6px 0 #000;
-    font-family: ${RETRO_FONT}; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
-    font-size: 42px; padding: 10px 28px;
+    font-family: ${RETRO_FONT}; font-weight: 700; letter-spacing: clamp(1px, 0.6vw, 3px);
+    text-transform: uppercase; white-space: nowrap;
+    font-size: clamp(18px, 5.5vw, 42px); padding: clamp(6px, 1.5vw, 10px) clamp(14px, 4vw, 28px);
   `;
   el.appendChild(inner);
   document.body.appendChild(el);
@@ -709,43 +717,44 @@ export function createMobileControls(onChange: (state: MobileControlState) => vo
   const wrapper = document.createElement("div");
   wrapper.style.cssText = `
     position: absolute; inset: 0; display: flex; justify-content: space-between;
-    align-items: flex-end; gap: 12px; padding: 12px; box-sizing: border-box;
-    pointer-events: auto;
+    align-items: flex-end; gap: 12px; box-sizing: border-box;
+    padding: 12px; padding-bottom: max(20px, env(safe-area-inset-bottom));
+    pointer-events: none;
   `;
   container.appendChild(wrapper);
 
+  // painel do direcional — mesmo estilo retrô do resto do HUD (borda branca grossa, sombra
+  // preta deslocada, sem blur/glass) em vez do visual "genérico" de antes
+  // pointer-events só nos widgets de verdade (não no wrapper inteiro) — senão a área vazia do
+  // meio da tela bloqueava cliques em telas por baixo, tipo o botão "Reiniciar" da vitória
   const steeringCard = document.createElement("div");
   steeringCard.style.cssText = `
     width: min(34vw, 210px); min-width: 180px; height: min(34vw, 210px);
-    background: rgba(11, 16, 30, 0.82); backdrop-filter: blur(12px);
-    border: 1px solid rgba(255,255,255,0.15); border-radius: 32px;
-    box-shadow: 0 22px 44px rgba(0,0,0,0.35);
-    position: relative; overflow: hidden; touch-action: none;
+    background: #14142b; border: 3px solid #fff; box-shadow: 5px 5px 0 #000;
+    position: relative; overflow: hidden; touch-action: none; pointer-events: auto;
     display: flex; align-items: center; justify-content: center;
   `;
 
   const steeringPad = document.createElement("div");
   steeringPad.style.cssText = `
     width: 88%; height: 88%; border-radius: 50%;
-    background: radial-gradient(circle at 50% 40%, rgba(255,255,255,0.18), transparent 34%),
-      radial-gradient(circle at 50% 50%, rgba(255,255,255,0.06), transparent 62%),
-      linear-gradient(180deg, rgba(15, 24, 45, 0.94), rgba(10, 14, 24, 0.96));
-    border: 2px solid rgba(255,255,255,0.2);
+    background: #0b0b1a;
+    border: 2px solid rgba(255,255,255,0.35);
     position: relative; display: flex; align-items: center; justify-content: center;
   `;
   steeringCard.appendChild(steeringPad);
 
   const ring = document.createElement("div");
   ring.style.cssText = `
-    position: absolute; inset: 12px; border: 1px dashed rgba(255,255,255,0.14);
+    position: absolute; inset: 12px; border: 1px dashed rgba(255,255,255,0.2);
     border-radius: 50%; pointer-events: none;
   `;
   steeringPad.appendChild(ring);
 
   const steerIndicator = document.createElement("div");
   steerIndicator.style.cssText = `
-    position: absolute; width: 16px; height: 16px; background: #ffd86a;
-    border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 0 10px rgba(255,216,106,0.08);
+    position: absolute; width: 18px; height: 18px; background: #ffe14d;
+    border: 2px solid #fff; border-radius: 50%;
     left: 50%; top: 50%; transform: translate(-50%, -50%);
     transition: left 0.08s ease-out;
   `;
@@ -755,7 +764,8 @@ export function createMobileControls(onChange: (state: MobileControlState) => vo
   steeringHint.textContent = "DIRIJA";
   steeringHint.style.cssText = `
     position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
-    color: rgba(255,255,255,0.82); font-size: 11.5px; letter-spacing: 1px;
+    font-family: ${RETRO_FONT}; font-weight: 700;
+    color: #fff; font-size: 11.5px; letter-spacing: 1px;
     text-transform: uppercase; pointer-events: none;
   `;
   steeringPad.appendChild(steeringHint);
@@ -800,38 +810,48 @@ export function createMobileControls(onChange: (state: MobileControlState) => vo
 
   const rightPanel = document.createElement("div");
   rightPanel.style.cssText = `
-    display: flex; gap: 10px; align-items: center; justify-content: flex-end;
-    width: min(34vw, 190px); min-width: 160px;
+    display: flex; gap: 12px; align-items: center; justify-content: flex-end;
+    width: min(34vw, 190px); min-width: 160px; pointer-events: auto;
   `;
 
-  function createActionButton(icon: string, color: string, accent: string) {
-    const button = document.createElement("div");
-    button.textContent = icon;
-    button.style.cssText = `
-      width: 76px; height: 76px; display: inline-flex; align-items: center;
-      justify-content: center; background: linear-gradient(180deg, ${accent} 0%, ${color} 100%);
-      color: #fff; border: 1px solid rgba(255,255,255,0.22); border-radius: 50%;
-      font-family: ${RETRO_FONT}; font-size: 32px; font-weight: 800;
-      box-shadow: 0 16px 28px rgba(0,0,0,0.24); user-select: none;
-      touch-action: none; transition: transform 0.15s ease, box-shadow 0.15s ease;
+  // triângulo desenhado só com borda CSS — não usa glifo de texto (▲/▼), que em alguns
+  // navegadores/fontes mobile renderizava como um ícone quebrado/genérico entre os botões
+  function createArrowTriangle(direction: "up" | "down"): HTMLDivElement {
+    const triangle = document.createElement("div");
+    const borderSide = direction === "up" ? "border-bottom" : "border-top";
+    triangle.style.cssText = `
+      width: 0; height: 0; margin: 0 auto;
+      border-left: 14px solid transparent; border-right: 14px solid transparent;
+      ${borderSide}: 22px solid #fff;
+      filter: drop-shadow(2px 2px 0 #000);
     `;
+    return triangle;
+  }
+
+  function createActionButton(direction: "up" | "down", color: string) {
+    const button = document.createElement("div");
+    button.style.cssText = `
+      width: 72px; height: 72px; display: flex; align-items: center;
+      justify-content: center; background: ${color};
+      border: 3px solid #fff; box-shadow: 4px 4px 0 #000;
+      user-select: none; touch-action: none; transition: transform 0.1s ease;
+    `;
+    button.appendChild(createArrowTriangle(direction));
     button.addEventListener("pointerdown", () => {
-      button.style.transform = "translateY(1px) scale(0.98)";
-      button.style.boxShadow = "0 8px 16px rgba(0,0,0,0.2)";
+      button.style.transform = "translate(2px, 2px)";
+      button.style.boxShadow = "2px 2px 0 #000";
     });
-    button.addEventListener("pointerup", () => {
-      button.style.transform = "translateY(0) scale(1)";
-      button.style.boxShadow = "0 16px 28px rgba(0,0,0,0.24)";
-    });
-    button.addEventListener("pointercancel", () => {
-      button.style.transform = "translateY(0) scale(1)";
-      button.style.boxShadow = "0 16px 28px rgba(0,0,0,0.24)";
-    });
+    const restore = () => {
+      button.style.transform = "translate(0, 0)";
+      button.style.boxShadow = "4px 4px 0 #000";
+    };
+    button.addEventListener("pointerup", restore);
+    button.addEventListener("pointercancel", restore);
     return button;
   }
 
-  const throttleButton = createActionButton("▲", "#27b84b", "#5ae186");
-  const brakeButton = createActionButton("▼", "#e24444", "#ff6f6f");
+  const throttleButton = createActionButton("up", "#1f8f3d");
+  const brakeButton = createActionButton("down", "#d4342c");
 
   function bindToggle(button: HTMLDivElement, key: keyof MobileControlState) {
     button.addEventListener("pointerdown", (event) => {
@@ -842,8 +862,6 @@ export function createMobileControls(onChange: (state: MobileControlState) => vo
     const release = (event: PointerEvent) => {
       event.preventDefault();
       commitState({ [key]: false } as Partial<MobileControlState>);
-      button.style.transform = "translateY(0) scale(1)";
-      button.style.boxShadow = "0 14px 26px rgba(0,0,0,0.22)";
     };
     button.addEventListener("pointerup", release);
     button.addEventListener("pointercancel", release);
