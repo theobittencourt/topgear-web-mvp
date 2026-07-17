@@ -73,6 +73,27 @@ if (isMobileDevice) {
 window.addEventListener("keydown", (e) => setKey(e.key, true));
 window.addEventListener("keyup", (e) => setKey(e.key, false));
 
+// bloqueio extra de zoom no mobile — o touch-action: none do CSS já ajuda, mas alguns navegadores
+// (principalmente Safari/iOS) ainda deixam passar zoom de pinça e double-tap por fora dele
+document.addEventListener(
+  "touchmove",
+  (e) => {
+    if (e.touches.length > 1) e.preventDefault();
+  },
+  { passive: false }
+);
+document.addEventListener("gesturestart", (e) => e.preventDefault());
+let lastTouchEnd = 0;
+document.addEventListener(
+  "touchend",
+  (e) => {
+    const now = Date.now();
+    if (now - lastTouchEnd < 350) e.preventDefault();
+    lastTouchEnd = now;
+  },
+  { passive: false }
+);
+
 function setKey(key: string, value: boolean) {
   const k = key.toLowerCase();
   if (k === "w" || k === "a" || k === "s" || k === "d") keys[k] = value;

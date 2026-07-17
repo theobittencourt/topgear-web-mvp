@@ -13,12 +13,14 @@
         height: 100%;
         overflow: hidden;
         background: #111;
-        /* remove o double-tap-to-zoom e o delay de ~300ms no toque, sem desabilitar cliques normais */
-        touch-action: manipulation;
+        /* "manipulation" só desabilita o double-tap-to-zoom, mas AINDA permite pinça — "none"
+           desabilita os dois. A página não precisa de pan/scroll nativo (é um jogo em tela cheia
+           fixa), então não perde nada relevante. */
+        touch-action: none;
         -webkit-user-select: none;
         user-select: none;
       }
-      #app { width: 100%; height: 100%; }
+      #app { width: 100%; height: 100%; touch-action: none; }
       canvas { display: block; touch-action: none; }
     </style>
   </head>
