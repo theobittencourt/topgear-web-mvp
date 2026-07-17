@@ -1,0 +1,6 @@
+[phases.install]
+# npm ci é estrito demais pro grafo de dependências do Colyseus 0.16 (uma dependência opcional
+# dele, @pm2/io, some do lockfile de forma inconsistente mesmo com o lockfile recém-gerado — bug
+# conhecido do npm com dependências opcionais). npm install --legacy-peer-deps é o que já usamos
+# em dev local sem problema.
+cmds = ["npm install --legacy-peer-deps"]
