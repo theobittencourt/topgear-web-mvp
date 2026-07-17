@@ -68,6 +68,11 @@ export class RaceRoom extends Room<RaceState> {
   private botCounter = 0;
 
   onCreate(options: RoomOptions) {
+    // o padrão do Colyseus manda atualização de state só 20x/s (a cada 50ms) — sincroniza com a
+    // taxa da própria simulação (30Hz) pra reduzir o "degrau" que a gente precisa disfarçar
+    // suavizando no client (menos degrau = menos suavização = resposta mais rápida ao input)
+    this.patchRate = 1000 / 30;
+
     const state = new RaceState();
     state.mapId = options?.mapId ?? "estadio";
     this.setState(state);

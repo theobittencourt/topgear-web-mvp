@@ -530,10 +530,11 @@ function startMultiplayerGame(config: TrackConfig, room: Room) {
     }
 
     const localLapBefore = localCar?.progress.lapCount ?? 0;
-    // o servidor só manda posição ~20x/s (patchRate padrão do Colyseus) mas a gente renderiza a
-    // 60fps — copiar a posição direto faz o carro (e a câmera, que mira nele) "degrau" a cada
-    // pacote novo. Suaviza em direção ao valor mais recente em vez de saltar pra ele.
-    const posT = Math.min(1, dt * 15);
+    // o servidor manda posição a 30Hz (patchRate ajustado, ver RaceRoom.onCreate) mas a gente
+    // renderiza a 60fps — copiar a posição direto faz o carro (e a câmera, que mira nele) "degrau"
+    // a cada pacote novo. Suaviza em direção ao valor mais recente em vez de saltar pra ele —
+    // rápido o bastante pra não sentir como atraso, devagar o bastante pra não tremer.
+    const posT = Math.min(1, dt * 22);
     room.state.cars.forEach((carState: any, sessionId: string) => {
       const entry = cars.get(sessionId);
       if (!entry) return;
