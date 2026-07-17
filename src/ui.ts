@@ -385,18 +385,31 @@ export function createVictoryOverlay(onRestart: () => void) {
   button.addEventListener("mouseleave", () => {
     button.style.background = "#d4342c";
   });
-  button.addEventListener("click", onRestart);
+  let clickHandler = onRestart;
+  button.addEventListener("click", () => clickHandler());
   el.appendChild(button);
 
   document.body.appendChild(el);
 
   return {
-    show(winnerLabel: string, winnerColor: number) {
+    show(
+      winnerLabel: string,
+      winnerColor: number,
+      restart?: { buttonLabel?: string; onRestart?: () => void; disabled?: boolean }
+    ) {
       const swatch = `<span style="display:inline-block;width:18px;height:18px;background:${colorToCss(
         winnerColor
       )};margin-right:10px;border:2px solid #fff;vertical-align:middle;"></span>`;
       winnerLine.innerHTML = `${swatch}${winnerLabel} Venceu!`;
       el.style.display = "flex";
+      button.textContent = restart?.buttonLabel ?? "Reiniciar";
+      button.disabled = !!restart?.disabled;
+      button.style.opacity = restart?.disabled ? "0.5" : "1";
+      button.style.cursor = restart?.disabled ? "not-allowed" : "pointer";
+      clickHandler = restart?.onRestart ?? onRestart;
+    },
+    hide() {
+      el.style.display = "none";
     },
   };
 }
@@ -471,6 +484,372 @@ export function createLoadingScreen() {
     },
     hide() {
       el.style.display = "none";
+    },
+    setText(text: string) {
+      title.textContent = text;
+    },
+  };
+}
+
+/** Tela pra escolher entre correr sozinho contra bots ou entrar numa sala online. */
+export function createModeSelectScreen(onSelect: (mode: "solo" | "online") => void) {
+  const el = document.createElement("div");
+  el.style.cssText = `
+    position: fixed; inset: 0; background: #0b0b1a;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 30; font-family: ${RETRO_FONT}; color: #fff; text-align: center; gap: 8px;
+  `;
+
+  const checkerBar = document.createElement("div");
+  checkerBar.style.cssText = `
+    width: 340px; height: 20px; margin-bottom: 24px;
+    background-image: repeating-conic-gradient(#fff 0% 25%, #111 0% 50%);
+    background-size: 20px 20px;
+    border: 3px solid #fff;
+  `;
+  el.appendChild(checkerBar);
+
+  const title = document.createElement("div");
+  title.style.cssText = `
+    font-size: 34px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
+    color: #ffe14d; text-shadow: 3px 3px 0 #000; margin-bottom: 32px;
+  `;
+  title.textContent = "Como Vai Correr?";
+  el.appendChild(title);
+
+  const list = document.createElement("div");
+  list.style.cssText = "display: flex; flex-direction: column; gap: 16px;";
+  el.appendChild(list);
+
+  const options: { mode: "solo" | "online"; label: string; color: string; hover: string }[] = [
+    { mode: "solo", label: "Solo (contra bots)", color: "#1f8f3d", hover: "#279a49" },
+    { mode: "online", label: "Sala Online (amigos)", color: "#1f5fb8", hover: "#2a6fc9" },
+  ];
+
+  for (const opt of options) {
+    const button = document.createElement("button");
+    button.textContent = opt.label;
+    button.style.cssText = `
+      font-family: ${RETRO_FONT}; font-size: 20px; font-weight: 700; letter-spacing: 2px;
+      text-transform: uppercase; padding: 14px 40px;
+      background: ${opt.color}; color: #fff; border: 3px solid #fff;
+      box-shadow: 4px 4px 0 #000; cursor: pointer;
+    `;
+    button.addEventListener("mouseenter", () => {
+      button.style.background = opt.hover;
+    });
+    button.addEventListener("mouseleave", () => {
+      button.style.background = opt.color;
+    });
+    button.addEventListener("click", () => {
+      el.style.display = "none";
+      onSelect(opt.mode);
+    });
+    list.appendChild(button);
+  }
+
+  document.body.appendChild(el);
+}
+
+/** Depois de escolher "Sala Online": criar uma sala nova (vira host) ou entrar com um código. */
+export function createOnlineChoiceScreen(onCreate: () => void, onJoin: () => void) {
+  const el = document.createElement("div");
+  el.style.cssText = `
+    position: fixed; inset: 0; background: #0b0b1a;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 30; font-family: ${RETRO_FONT}; color: #fff; text-align: center; gap: 8px;
+  `;
+
+  const title = document.createElement("div");
+  title.style.cssText = `
+    font-size: 30px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
+    color: #ffe14d; text-shadow: 3px 3px 0 #000; margin-bottom: 32px;
+  `;
+  title.textContent = "Sala Online";
+  el.appendChild(title);
+
+  const list = document.createElement("div");
+  list.style.cssText = "display: flex; flex-direction: column; gap: 16px;";
+  el.appendChild(list);
+
+  const options: { label: string; color: string; hover: string; onClick: () => void }[] = [
+    { label: "Criar Sala", color: "#1f8f3d", hover: "#279a49", onClick: onCreate },
+    { label: "Entrar com Código", color: "#1f5fb8", hover: "#2a6fc9", onClick: onJoin },
+  ];
+
+  for (const opt of options) {
+    const button = document.createElement("button");
+    button.textContent = opt.label;
+    button.style.cssText = `
+      font-family: ${RETRO_FONT}; font-size: 20px; font-weight: 700; letter-spacing: 2px;
+      text-transform: uppercase; padding: 14px 40px;
+      background: ${opt.color}; color: #fff; border: 3px solid #fff;
+      box-shadow: 4px 4px 0 #000; cursor: pointer;
+    `;
+    button.addEventListener("mouseenter", () => {
+      button.style.background = opt.hover;
+    });
+    button.addEventListener("mouseleave", () => {
+      button.style.background = opt.color;
+    });
+    button.addEventListener("click", () => {
+      el.style.display = "none";
+      opt.onClick();
+    });
+    list.appendChild(button);
+  }
+
+  document.body.appendChild(el);
+}
+
+/** Campo pra digitar o código da sala de um amigo. */
+export function createCodeEntryScreen(onSubmit: (code: string) => void) {
+  const el = document.createElement("div");
+  el.style.cssText = `
+    position: fixed; inset: 0; background: #0b0b1a;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 30; font-family: ${RETRO_FONT}; color: #fff; text-align: center; gap: 8px;
+  `;
+
+  const title = document.createElement("div");
+  title.style.cssText = `
+    font-size: 22px; letter-spacing: 2px; text-transform: uppercase; color: #ffe14d;
+    margin-bottom: 20px;
+  `;
+  title.textContent = "Código da Sala";
+  el.appendChild(title);
+
+  // sem text-transform/toUpperCase aqui: o código da sala do Colyseus é case-sensitive
+  // (tem letras minúsculas mesmo), então forçar maiúsculas quebraria o "entrar com código"
+  const input = document.createElement("input");
+  input.type = "text";
+  input.maxLength = 12;
+  input.placeholder = "código";
+  input.style.cssText = `
+    font-family: ${RETRO_FONT}; font-size: 28px; font-weight: 700; letter-spacing: 4px;
+    text-align: center; color: #fff; background: #14142b;
+    border: 4px solid #fff; box-shadow: 5px 5px 0 #000; padding: 10px 16px; width: 280px;
+    margin-bottom: 28px; caret-color: #ff3b3b;
+  `;
+  input.addEventListener("input", () => {
+    input.value = input.value.trim();
+  });
+  el.appendChild(input);
+
+  const button = document.createElement("button");
+  button.textContent = "Entrar";
+  button.style.cssText = `
+    font-family: ${RETRO_FONT}; font-size: 24px; font-weight: 700; letter-spacing: 2px;
+    text-transform: uppercase; padding: 14px 48px;
+    background: #1f5fb8; color: #fff; border: 3px solid #fff;
+    box-shadow: 4px 4px 0 #000; cursor: pointer;
+  `;
+  button.addEventListener("mouseenter", () => {
+    button.style.background = "#2a6fc9";
+  });
+  button.addEventListener("mouseleave", () => {
+    button.style.background = "#1f5fb8";
+  });
+
+  function submit() {
+    const code = input.value.trim();
+    if (!code) return;
+    el.style.display = "none";
+    onSubmit(code);
+  }
+
+  button.addEventListener("click", submit);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submit();
+  });
+
+  el.appendChild(button);
+  document.body.appendChild(el);
+
+  window.setTimeout(() => input.focus(), 0);
+}
+
+export interface LobbyPlayer {
+  id: string;
+  name: string;
+  color: number;
+  isBot: boolean;
+}
+
+export interface LobbyUpdate {
+  code: string;
+  players: LobbyPlayer[];
+  isHost: boolean;
+  localId: string;
+  minRacers: number;
+  maxRacers: number;
+  onAddBot: () => void;
+  onStart: () => void;
+  onKick: (id: string) => void;
+}
+
+/** Sala de espera: mostra o código, quem já entrou, e (só pro host) os controles de bot/iniciar. */
+export function createLobbyScreen() {
+  const el = document.createElement("div");
+  el.style.cssText = `
+    position: fixed; inset: 0; background: #0b0b1a;
+    display: none; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 30; font-family: ${RETRO_FONT}; color: #fff; text-align: center; gap: 8px;
+  `;
+
+  const title = document.createElement("div");
+  title.style.cssText = `
+    font-size: 26px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
+    color: #ffe14d; text-shadow: 3px 3px 0 #000; margin-bottom: 18px;
+  `;
+  title.textContent = "Sala de Espera";
+  el.appendChild(title);
+
+  const codeRow = document.createElement("div");
+  codeRow.style.cssText = "display: flex; align-items: center; gap: 10px; margin-bottom: 22px;";
+  el.appendChild(codeRow);
+
+  // text-transform: none sobrescreve o uppercase padrão do retroPanelStyle — o código da sala é
+  // case-sensitive (tem letras minúsculas), então precisa aparecer exatamente como é de verdade
+  const codeLabel = document.createElement("div");
+  codeLabel.style.cssText = retroPanelStyle(
+    "font-size: 26px; letter-spacing: 4px; color: #fff; background: #14142b; text-transform: none;"
+  );
+  codeRow.appendChild(codeLabel);
+
+  const copyButton = document.createElement("button");
+  copyButton.textContent = "Copiar";
+  copyButton.style.cssText = `
+    font-family: ${RETRO_FONT}; font-size: 13px; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; padding: 8px 14px; background: #1f5fb8; color: #fff;
+    border: 3px solid #fff; box-shadow: 3px 3px 0 #000; cursor: pointer;
+  `;
+  copyButton.addEventListener("click", () => {
+    const text = codeLabel.textContent ?? "";
+
+    function flash(label: string) {
+      copyButton.textContent = label;
+      window.setTimeout(() => (copyButton.textContent = "Copiar"), 1200);
+    }
+
+    // navigator.clipboard só existe em contexto seguro (https ou localhost) — acessando pelo IP
+    // da rede local (http puro) ele nem existe, então cai no fallback do textarea escondido
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(() => flash("Copiado!")).catch(() => flash("Falhou"));
+      return;
+    }
+
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+      document.execCommand("copy");
+      flash("Copiado!");
+    } catch {
+      flash("Falhou");
+    }
+    document.body.removeChild(textarea);
+  });
+  codeRow.appendChild(copyButton);
+
+  const listPanel = document.createElement("div");
+  listPanel.style.cssText = retroPanelStyle(
+    "width: 300px; min-height: 140px; text-align: left; color: #fff; background: #14142b; display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px;"
+  );
+  el.appendChild(listPanel);
+
+  const statusText = document.createElement("div");
+  statusText.style.cssText = "font-size: 14px; letter-spacing: 1px; color: #8ecbff; margin-bottom: 18px;";
+  el.appendChild(statusText);
+
+  const controls = document.createElement("div");
+  controls.style.cssText = "display: flex; gap: 16px;";
+  el.appendChild(controls);
+
+  const addBotButton = document.createElement("button");
+  addBotButton.textContent = "+ Adicionar Bot";
+  addBotButton.style.cssText = `
+    font-family: ${RETRO_FONT}; font-size: 16px; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; padding: 12px 20px; background: #6b4a2f; color: #fff;
+    border: 3px solid #fff; box-shadow: 4px 4px 0 #000; cursor: pointer;
+  `;
+  controls.appendChild(addBotButton);
+
+  const startButton = document.createElement("button");
+  startButton.textContent = "Iniciar Corrida";
+  startButton.style.cssText = `
+    font-family: ${RETRO_FONT}; font-size: 16px; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; padding: 12px 20px; background: #1f8f3d; color: #fff;
+    border: 3px solid #fff; box-shadow: 4px 4px 0 #000; cursor: pointer;
+  `;
+  controls.appendChild(startButton);
+
+  function setButtonEnabled(button: HTMLButtonElement, enabled: boolean) {
+    button.disabled = !enabled;
+    button.style.opacity = enabled ? "1" : "0.4";
+    button.style.cursor = enabled ? "pointer" : "not-allowed";
+  }
+
+  let onAddBot: (() => void) | null = null;
+  let onStart: (() => void) | null = null;
+  addBotButton.addEventListener("click", () => onAddBot?.());
+  startButton.addEventListener("click", () => onStart?.());
+
+  document.body.appendChild(el);
+
+  return {
+    show() {
+      el.style.display = "flex";
+    },
+    hide() {
+      el.style.display = "none";
+    },
+    update(opts: LobbyUpdate) {
+      codeLabel.textContent = opts.code;
+      onAddBot = opts.onAddBot;
+      onStart = opts.onStart;
+
+      listPanel.innerHTML = "";
+      opts.players.forEach((p) => {
+        const row = document.createElement("div");
+        row.style.cssText = "display: flex; align-items: center; gap: 8px; font-size: 14px;";
+        const swatch = document.createElement("span");
+        swatch.style.cssText = `width: 12px; height: 12px; background: ${colorToCss(p.color)}; border: 2px solid #000; flex-shrink: 0;`;
+        row.appendChild(swatch);
+        const label = document.createElement("span");
+        label.textContent = p.isBot ? `${p.name} (BOT)` : p.name;
+        label.style.flex = "1";
+        row.appendChild(label);
+        // host pode remover qualquer bot ou jogador, menos a si mesmo
+        if (opts.isHost && p.id !== opts.localId) {
+          const kickButton = document.createElement("button");
+          kickButton.textContent = "×";
+          kickButton.title = "Remover";
+          kickButton.style.cssText = `
+            font-family: ${RETRO_FONT}; font-size: 14px; font-weight: 700; line-height: 1;
+            padding: 3px 9px; background: #d4342c; color: #fff; border: 2px solid #fff;
+            cursor: pointer; flex-shrink: 0;
+          `;
+          kickButton.addEventListener("click", () => opts.onKick(p.id));
+          row.appendChild(kickButton);
+        }
+        listPanel.appendChild(row);
+      });
+
+      controls.style.display = opts.isHost ? "flex" : "none";
+      if (opts.isHost) {
+        setButtonEnabled(addBotButton, opts.players.length < opts.maxRacers);
+        setButtonEnabled(startButton, opts.players.length >= opts.minRacers);
+        statusText.textContent =
+          opts.players.length < opts.minRacers
+            ? `Mínimo de ${opts.minRacers} carros pra largar — adicione bots ou espere mais gente`
+            : "Pronto pra largar quando quiser!";
+      } else {
+        statusText.textContent = "Aguardando o host iniciar a corrida...";
+      }
     },
   };
 }
