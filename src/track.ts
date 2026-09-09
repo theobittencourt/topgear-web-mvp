@@ -1,6 +1,9 @@
 import * as THREE from "three";
 import { mapShape, stadiumPoints, buildTrackPath, ROAD_WIDTH } from "@shared/trackGeometry";
 import type { Point2 } from "@shared/trackGeometry";
+import { VISUAL, ART } from "./retro";
+import { createPlantTexture, createChevronTexture, addBillboards } from "./sprites";
+import type { PlantKind, BillboardInstance, BillboardGroup } from "./sprites";
 
 export { ROAD_WIDTH };
 
@@ -47,6 +50,17 @@ const NIGHT_LAMP_LIGHT_EVERY = 3;
 const TUNNEL_LIGHT_EVERY = 2;
 
 /**
+ * Altura de cada tipo de planta, em unidades de mundo (a largura sai da proporção da textura).
+ * Pra ter referência: a pista tem 24 de largura e o carro 4,4 de comprimento.
+ */
+const PLANT_HEIGHT: Record<PlantKind, [number, number]> = {
+  palmeira: [9, 15],
+  pinheiro: [6, 11],
+  cacto: [4, 7],
+  arbusto: [1.8, 3.4],
+};
+
+/**
  * Configuração VISUAL de um mapa. A forma da pista em si (tamanho, raio das curvas, largura) mora
  * em `@shared/trackGeometry`, indexada por este mesmo `id` — porque o servidor precisa dela igual
  * pra simular os bots, e antes era copiada à mão nos dois lados.
@@ -56,38 +70,87 @@ export interface TrackConfig {
   name: string;
   hasTunnel: boolean;
   night: boolean;
+  /** cor chapada do céu (vira o topo do degradê, quando ele está ligado) */
+  skyColor: number;
+  /**
+   * Cor da faixa de morros no horizonte. O fog fecha NESSA cor e os morros são pintados com ela,
+   * então os dois se fundem numa faixa sólida com uma linha nítida contra o céu — que é
+   * exatamente como o horizonte do Top Gear se parece.
+   */
+  horizonColor: number;
   roadColor: number;
-  foliageColors: number[];
+  /** faixa clara entre o asfalto e a zebra */
+  shoulderColor: number;
+  /** as duas cores que se alternam nas faixas do chão */
+  groundA: number;
+  groundB: number;
+  /** barranco que desce do terreno elevado até o nível do chão */
+  bankColor: number;
+  /** que sprites de vegetação esse mapa espalha */
+  plants: PlantKind[];
   billboards: boolean;
 }
 
 export const TRACK_PRESETS: TrackConfig[] = [
   {
-    id: "estadio",
-    name: "Estádio Clássico",
+    id: "vale",
+    name: "Vale Esmeralda",
     hasTunnel: true,
     night: false,
-    roadColor: 0x2d4a44,
-    foliageColors: [0x2f7a3d, 0x357a42, 0x2a6b36, 0x3d8a4a, 0x276b38, 0x4a9456],
+    skyColor: 0x33bff0,
+    horizonColor: 0x8a9a3d,
+    roadColor: 0x4e5c56,
+    shoulderColor: 0xb4b9b0,
+    groundA: 0x2f8f38,
+    groundB: 0x41a94a,
+    bankColor: 0x226b2a,
+    plants: ["pinheiro", "arbusto"],
     billboards: false,
   },
   {
-    id: "litoral",
-    name: "Circuito Litoral",
+    id: "palmares",
+    name: "Costa Palmares",
     hasTunnel: false,
     night: false,
-    roadColor: 0x3a4a4a,
-    foliageColors: [0x3d8a4a, 0x4a9456, 0x357a42],
+    skyColor: 0x2ac6f2,
+    horizonColor: 0x9fae44,
+    roadColor: 0x55605b,
+    shoulderColor: 0xbcc0b6,
+    groundA: 0x35a03f,
+    groundB: 0x49bb53,
+    bankColor: 0x2a7a33,
+    plants: ["palmeira", "arbusto"],
     billboards: true,
   },
   {
-    id: "noturno",
-    name: "Circuito Noturno",
+    id: "medianoite",
+    name: "Distrito Meia-Noite",
     hasTunnel: true,
     night: true,
-    roadColor: 0x232f30,
-    foliageColors: [0x1e4a28, 0x224f2c, 0x1a3f22],
+    skyColor: 0x070a1a,
+    horizonColor: 0x161d38,
+    roadColor: 0x2b3236,
+    shoulderColor: 0x5a5f5c,
+    groundA: 0x11241a,
+    groundB: 0x1a3722,
+    bankColor: 0x0d1c13,
+    plants: ["arbusto"],
     billboards: true,
+  },
+  {
+    id: "dunas",
+    name: "Dunas de Ocre",
+    hasTunnel: false,
+    night: false,
+    skyColor: 0x3fb4ee,
+    horizonColor: 0xc2a05a,
+    roadColor: 0x5c5a52,
+    shoulderColor: 0xc4bfae,
+    groundA: 0xc19a55,
+    groundB: 0xd6b374,
+    bankColor: 0xa5854a,
+    plants: ["cacto"],
+    billboards: false,
   },
 ];
 
@@ -343,12 +406,14 @@ function buildStripedRing(
   innerPts: Point2[],
   elevation: number[],
   baseY: number,
-  stripeSegments: number
+  stripeSegments: number,
+  colorHexA = 0xcc2222,
+  colorHexB = 0xf2f2f2
 ): THREE.Mesh {
   const positions: number[] = [];
   const colors: number[] = [];
-  const colorA = new THREE.Color(0xcc2222);
-  const colorB = new THREE.Color(0xf2f2f2);
+  const colorA = new THREE.Color(colorHexA);
+  const colorB = new THREE.Color(colorHexB);
   const n = Math.min(outerPts.length, innerPts.length) - 1;
 
   for (let i = 0; i < n; i++) {
@@ -445,7 +510,7 @@ export function createTrack(scene: THREE.Scene, config: TrackConfig = TRACK_PRES
   // grama (mais escura no modo noturno)
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(700, 700),
-    new THREE.MeshStandardMaterial({ color: config.night ? 0x11241a : 0x2d6a2f })
+    new THREE.MeshStandardMaterial({ color: config.groundA })
   );
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = -0.01;
@@ -476,6 +541,24 @@ export function createTrack(scene: THREE.Scene, config: TrackConfig = TRACK_PRES
   });
   scene.add(buildRibbon(outerEdgePts, innerEdgePts, elevation, 0, roadMaterial));
 
+  // faixa clara de acostamento, por dentro do asfalto e colada na zebra — na referência ela
+  // aparece nos dois lados da pista, separando o asfalto escuro do vermelho/branco
+  const shoulderMaterial = new THREE.MeshStandardMaterial({
+    color: config.shoulderColor,
+    roughness: 1,
+    side: THREE.DoubleSide,
+  });
+  const outerShoulderPts = stadiumPoints(
+    outerW - 3,
+    outerH - 3,
+    Math.max(cornerRadius - 1.5, 1),
+    EDGE_DIVISIONS
+  );
+  scene.add(buildRibbon(outerEdgePts, outerShoulderPts, elevation, 0.008, shoulderMaterial));
+
+  const innerShoulderPts = stadiumPoints(innerW + 3, innerH + 3, innerR + 1.5, EDGE_DIVISIONS);
+  scene.add(buildRibbon(innerShoulderPts, innerEdgePts, elevation, 0.008, shoulderMaterial));
+
   // meio-fio em zebra (vermelho/branco), borda externa e interna
   const outerCurbPts = stadiumPoints(outerW + 3, outerH + 3, cornerRadius + 1.5, EDGE_DIVISIONS);
   scene.add(buildStripedRing(outerCurbPts, outerEdgePts, elevation, 0.01, 3));
@@ -488,31 +571,69 @@ export function createTrack(scene: THREE.Scene, config: TrackConfig = TRACK_PRES
   );
   scene.add(buildStripedRing(innerEdgePts, innerCurbPts, elevation, 0.01, 3));
 
-  // calçada de concreto entre o meio-fio e a grama, tipo circuito urbano retrô
-  const sidewalkMaterial = new THREE.MeshStandardMaterial({
-    color: 0xb9b6a8,
-    roughness: 1,
-    side: THREE.DoubleSide,
-  });
+  // calçada de concreto entre o meio-fio e a grama, tipo circuito urbano retrô. Os contornos são
+  // calculados de qualquer jeito (os postes de luz se apoiam neles), mas a faixa de concreto em si
+  // só é desenhada se estiver ligada — ver ART.concreteSidewalk.
   const outerSidewalkPts = stadiumPoints(outerW + 12, outerH + 12, cornerRadius + 6, EDGE_DIVISIONS);
-  scene.add(buildRibbon(outerSidewalkPts, outerCurbPts, elevation, 0.005, sidewalkMaterial));
-
   const innerSidewalkPts = stadiumPoints(
     Math.max(innerW - 12, 1),
     Math.max(innerH - 12, 1),
     Math.max(innerR - 6, 0.5),
     EDGE_DIVISIONS
   );
-  scene.add(buildRibbon(innerCurbPts, innerSidewalkPts, elevation, 0.005, sidewalkMaterial));
 
-  // "saias" fechando o vão entre a pista elevada e a grama (evita buracos/flutuação visual)
+  if (ART.concreteSidewalk) {
+    const sidewalkMaterial = new THREE.MeshStandardMaterial({
+      color: 0xb9b6a8,
+      roughness: 1,
+      side: THREE.DoubleSide,
+    });
+    scene.add(buildRibbon(outerSidewalkPts, outerCurbPts, elevation, 0.005, sidewalkMaterial));
+    scene.add(buildRibbon(innerCurbPts, innerSidewalkPts, elevation, 0.005, sidewalkMaterial));
+  }
+
+  // Faixas alternadas de grama dos dois lados da pista — a assinatura visual do Top Gear/OutRun.
+  // O que dá sensação de velocidade num jogo desses não é o carro andar, é o chão piscando.
+  //
+  // Elas usam o MESMO perfil de elevação da pista, de propósito: a pista é uma fita que sobe até
+  // ~13 unidades acima do plano de grama, então uma faixa chapada no nível do chão ficava lá
+  // embaixo, escondida atrás da "saia" — invisível de dentro do carro. Acompanhando a elevação, o
+  // terreno sobe e desce junto com o asfalto e fica colado nele, que é como o Top Gear se parece.
+  const outerGrassPts = stadiumPoints(outerW + 90, outerH + 90, cornerRadius + 45, EDGE_DIVISIONS);
+  const innerGrassPts = stadiumPoints(
+    Math.max(innerW - 70, 1),
+    Math.max(innerH - 70, 1),
+    Math.max(innerR - 35, 0.5),
+    EDGE_DIVISIONS
+  );
+
+  if (ART.groundStripes) {
+    const grassA = config.groundA;
+    const grassB = config.groundB;
+    const faixa = ART.groundStripeWidth;
+    // encostam no contorno mais interno que sobrar: a calçada, se ela existir, senão a própria zebra
+    const outerInnerEdge = ART.concreteSidewalk ? outerSidewalkPts : outerCurbPts;
+    const innerInnerEdge = ART.concreteSidewalk ? innerSidewalkPts : innerCurbPts;
+    scene.add(buildStripedRing(outerGrassPts, outerInnerEdge, elevation, 0.004, faixa, grassA, grassB));
+    scene.add(buildStripedRing(innerInnerEdge, innerGrassPts, elevation, 0.004, faixa, grassA, grassB));
+  }
+
+  // "saias" fechando o vão entre o terreno elevado e a grama (evita buracos/flutuação visual).
+  // Descem a partir do contorno mais EXTERNO que existir — com as faixas ligadas é o da grama
+  // listrada, senão é o da calçada.
+  //
+  // A cor acompanha a grama de propósito: com o terreno listrado indo até 90 unidades pra fora e
+  // subindo junto com a pista, essa parede ficou grande e bem visível — em cinza-concreto ela lia
+  // como um paredão do nada no meio do campo, e em verde escuro lê como barranco.
   const skirtMaterial = new THREE.MeshStandardMaterial({
-    color: 0x6b6459,
+    color: config.bankColor,
     roughness: 1,
     side: THREE.DoubleSide,
   });
-  scene.add(buildSkirt(outerSidewalkPts, elevation, 0.005, -0.01, skirtMaterial));
-  scene.add(buildSkirt(innerSidewalkPts, elevation, 0.005, -0.01, skirtMaterial));
+  const skirtOuterPts = ART.groundStripes ? outerGrassPts : outerSidewalkPts;
+  const skirtInnerPts = ART.groundStripes ? innerGrassPts : innerSidewalkPts;
+  scene.add(buildSkirt(skirtOuterPts, elevation, 0.005, -0.01, skirtMaterial));
+  scene.add(buildSkirt(skirtInnerPts, elevation, 0.005, -0.01, skirtMaterial));
 
   // postes de luz ao longo da calçada externa, tipo circuito urbano retrô
   const lampPoleMaterial = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.8 });
@@ -736,14 +857,19 @@ export function createTrack(scene: THREE.Scene, config: TrackConfig = TRACK_PRES
     );
   }
 
-  // árvores ao redor da pista — vários anéis (perto, médio, longe) pra dar densidade e profundidade.
-  // No fim tudo vira 3 InstancedMesh (tronco + duas copas), não ~900 meshes soltos.
-  const foliageColors = config.foliageColors;
-  const trunks: Instance[] = [];
-  const foliageLower: Instance[] = [];
-  const foliageUpper: Instance[] = [];
+  // Vegetação de beira de pista, em SPRITE 2D que sempre encara a câmera — no Top Gear nada disso
+  // é geometria 3D, e sprite chapado combina muito melhor com a resolução interna baixa. Cada tipo
+  // de planta vira um InstancedMesh só (ver src/sprites.ts).
+  const billboardGroups: BillboardGroup[] = [];
+  const plantInstances = new Map<PlantKind, BillboardInstance[]>();
+  for (const kind of config.plants) plantInstances.set(kind, []);
 
-  function scatterTrees(ringOffset: number, pointCount: number, everyN: number, jitterRange: number) {
+  function scatterPlants(
+    ringOffset: number,
+    pointCount: number,
+    everyN: number,
+    jitterRange: number
+  ) {
     const pts = stadiumPoints(
       outerW + ringOffset,
       outerH + ringOffset,
@@ -754,81 +880,115 @@ export function createTrack(scene: THREE.Scene, config: TrackConfig = TRACK_PRES
       if (i % everyN !== 0) return;
       const jitter = Math.abs((Math.sin(i * 12.9898 + ringOffset) * 43758.5453) % 1);
       const jitter2 = Math.abs((Math.sin(i * 78.233 + ringOffset) * 12543.113) % 1);
-      const x = p.x + (jitter - 0.5) * jitterRange;
-      const z = p.z + (jitter2 - 0.5) * jitterRange;
-      const s = 0.65 + jitter * 0.85;
-      const color = foliageColors[(i + Math.floor(ringOffset)) % foliageColors.length];
+      const kind = config.plants[(i + Math.floor(ringOffset)) % config.plants.length];
 
-      // a escala é uniforme, então a altura local de cada peça só precisa ser multiplicada por ela
-      trunks.push({ x, y: 0.8 * s, z, scaleX: s, scaleY: s, scaleZ: s });
-      foliageLower.push({ x, y: 2.4 * s, z, scaleX: s, scaleY: s, scaleZ: s, color });
-      foliageUpper.push({ x, y: 3.6 * s, z, scaleX: s, scaleY: s, scaleZ: s, color });
+      // dentro do terreno elevado (até +90 unidades) a planta se apoia na elevação da pista;
+      // além disso o chão volta a ser o plano de grama, no zero
+      const elevIndex = Math.min(EDGE_DIVISIONS, Math.round((i / pointCount) * EDGE_DIVISIONS));
+      const groundY = ringOffset <= 90 ? elevation[elevIndex] : 0;
+
+      // a altura vem do TIPO da planta, não do anel: um coqueiro é alto e um arbusto é baixinho,
+      // independente de estar perto ou longe da pista
+      const [minHeight, maxHeight] = PLANT_HEIGHT[kind];
+      plantInstances.get(kind)!.push({
+        x: p.x + (jitter - 0.5) * jitterRange,
+        z: p.z + (jitter2 - 0.5) * jitterRange,
+        groundY,
+        height: minHeight + jitter * (maxHeight - minHeight),
+      });
     });
   }
-  scatterTrees(18, 64, 3, 5);
-  scatterTrees(55, 72, 1, 7);
-  scatterTrees(90, 64, 1, 8);
-  scatterTrees(130, 56, 1, 10);
-  scatterTrees(175, 48, 1, 14);
-  scatterTrees(225, 40, 1, 18);
+  scatterPlants(20, 64, 2, 6);
+  scatterPlants(55, 72, 1, 7);
+  scatterPlants(90, 64, 1, 8);
+  scatterPlants(130, 56, 1, 10);
+  scatterPlants(175, 48, 1, 14);
+  scatterPlants(225, 40, 1, 18);
 
-  const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x6b4a2f });
-  // branco de base porque a cor real de cada copa vem por instância (setColorAt multiplica)
-  const foliageMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
-  addInstances(scene, new THREE.CylinderGeometry(0.25, 0.3, 1.6, 6), trunkMaterial, trunks, {
-    castShadow: true,
-  });
-  addInstances(scene, new THREE.ConeGeometry(1.6, 2.4, 8), foliageMaterial, foliageLower, {
-    castShadow: true,
-  });
-  addInstances(scene, new THREE.ConeGeometry(1.2, 1.8, 8), foliageMaterial, foliageUpper, {
-    castShadow: true,
+  plantInstances.forEach((list, kind) => {
+    const group = addBillboards(scene, createPlantTexture(kind), list);
+    if (group) billboardGroups.push(group);
   });
 
-  // nuvens no céu — várias camadas de altura/distância, todas numa InstancedMesh de esferas
-  const cloudLayers = [
-    { count: 14, radiusMin: 160, radiusRange: 90, heightMin: 45, heightRange: 15 },
-    { count: 12, radiusMin: 260, radiusRange: 120, heightMin: 65, heightRange: 25 },
-    { count: 10, radiusMin: 380, radiusRange: 140, heightMin: 90, heightRange: 35 },
-  ];
-  const cloudPuffs: Instance[] = [];
-  cloudLayers.forEach((layer, layerIndex) => {
-    for (let i = 0; i < layer.count; i++) {
-      const angle = (i / layer.count) * Math.PI * 2 + layerIndex * 0.3;
-      const radius = layer.radiusMin + Math.random() * layer.radiusRange;
-      const cx = Math.cos(angle) * radius;
-      const cy = layer.heightMin + Math.random() * layer.heightRange;
-      const cz = Math.sin(angle) * radius;
-      const cloudScale = 0.8 + Math.random() * 0.9;
+  // Placas de seta avisando curva, plantadas do lado de fora de cada curva — um dos detalhes mais
+  // reconhecíveis do jogo. Trecho reto não ganha placa nenhuma.
+  const signsLeft: BillboardInstance[] = [];
+  const signsRight: BillboardInstance[] = [];
+  const wpCount = waypoints.length;
+  for (let i = 0; i < wpCount; i += 3) {
+    const prev = waypoints[(i - 3 + wpCount) % wpCount];
+    const cur = waypoints[i];
+    const next = waypoints[(i + 3) % wpCount];
+    const headingIn = Math.atan2(cur.x - prev.x, cur.z - prev.z);
+    const headingOut = Math.atan2(next.x - cur.x, next.z - cur.z);
+    let turn = headingOut - headingIn;
+    while (turn > Math.PI) turn -= Math.PI * 2;
+    while (turn < -Math.PI) turn += Math.PI * 2;
+    if (Math.abs(turn) < 0.12) continue;
 
-      const puffCount = 4 + Math.floor(Math.random() * 3);
-      for (let p = 0; p < puffCount; p++) {
-        const puffRadius = 3 + Math.random() * 2;
-        const localX = p * 3.5 - (puffCount * 3.5) / 2;
-        const localY = Math.random() * 1.5;
-        const localZ = Math.random() * 2;
-        cloudPuffs.push({
-          x: cx + localX * cloudScale,
-          y: cy + localY * cloudScale,
-          z: cz + localZ * cloudScale,
-          // esfera unitária: o raio do puff entra na escala, junto com o achatamento em Y
-          scaleX: puffRadius * cloudScale,
-          scaleY: puffRadius * 0.6 * cloudScale,
-          scaleZ: puffRadius * cloudScale,
-        });
+    // "fora da curva" = afastando do centro da pista, que fica na origem
+    const dist = Math.hypot(cur.x, cur.z) || 1;
+    const offset = roadWidth / 2 + 7;
+    const sign: BillboardInstance = {
+      x: cur.x + (cur.x / dist) * offset,
+      z: cur.z + (cur.z / dist) * offset,
+      groundY: cur.y,
+      height: 5,
+    };
+    // heading crescendo = curva pra esquerda (mesma convenção da física, ver @shared/physics)
+    (turn > 0 ? signsLeft : signsRight).push(sign);
+  }
+  const leftGroup = addBillboards(scene, createChevronTexture(true), signsLeft);
+  if (leftGroup) billboardGroups.push(leftGroup);
+  const rightGroup = addBillboards(scene, createChevronTexture(false), signsRight);
+  if (rightGroup) billboardGroups.push(rightGroup);
+
+  // nuvens: desligadas por padrão (ver VISUAL.clouds) — o céu da referência é limpo e chapado
+  if (VISUAL.clouds) {
+    const cloudLayers = [
+      { count: 14, radiusMin: 160, radiusRange: 90, heightMin: 45, heightRange: 15 },
+      { count: 12, radiusMin: 260, radiusRange: 120, heightMin: 65, heightRange: 25 },
+      { count: 10, radiusMin: 380, radiusRange: 140, heightMin: 90, heightRange: 35 },
+    ];
+    const cloudPuffs: Instance[] = [];
+    cloudLayers.forEach((layer, layerIndex) => {
+      for (let i = 0; i < layer.count; i++) {
+        const angle = (i / layer.count) * Math.PI * 2 + layerIndex * 0.3;
+        const radius = layer.radiusMin + Math.random() * layer.radiusRange;
+        const cx = Math.cos(angle) * radius;
+        const cy = layer.heightMin + Math.random() * layer.heightRange;
+        const cz = Math.sin(angle) * radius;
+        const cloudScale = 0.8 + Math.random() * 0.9;
+        const puffCount = 4 + Math.floor(Math.random() * 3);
+        for (let p = 0; p < puffCount; p++) {
+          const puffRadius = 3 + Math.random() * 2;
+          cloudPuffs.push({
+            x: cx + (p * 3.5 - (puffCount * 3.5) / 2) * cloudScale,
+            y: cy + Math.random() * 1.5 * cloudScale,
+            z: cz + Math.random() * 2 * cloudScale,
+            scaleX: puffRadius * cloudScale,
+            scaleY: puffRadius * 0.6 * cloudScale,
+            scaleZ: puffRadius * cloudScale,
+          });
+        }
       }
-    }
-  });
-  addInstances(
-    scene,
-    new THREE.SphereGeometry(1, 8, 6),
-    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 }),
-    cloudPuffs
-  );
+    });
+    addInstances(
+      scene,
+      new THREE.SphereGeometry(1, 8, 6),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 }),
+      cloudPuffs
+    );
+  }
 
-  // montanhas arredondadas no horizonte — três cadeias em distâncias diferentes. Só a metade de
-  // cima de uma esfera (domo), assentada no chão, com a cor vindo por instância.
-  const mountainColors = [0x5a6b7a, 0x6b7a88, 0x4d5c6b, 0x62778a, 0x445468, 0x738495];
+  // Morros no horizonte, todos tingidos com a MESMA cor em que o fog fecha (ver
+  // TrackConfig.horizonColor). Assim eles e a névoa viram uma faixa sólida só, com uma linha
+  // nítida contra o céu — em vez de montanhas azuladas se dissolvendo, que denunciava a
+  // profundidade 3D.
+  const horizonBase = new THREE.Color(config.horizonColor);
+  const mountainColors = [0.82, 1.0, 1.14, 0.9, 1.06, 0.74].map((f) =>
+    horizonBase.clone().multiplyScalar(f).getHex()
+  );
   const mountainRanges = [
     { count: 28, radiusMin: 280, radiusRange: 50, heightMin: 18, heightRange: 22, widthMin: 20, widthRange: 25 },
     { count: 34, radiusMin: 360, radiusRange: 90, heightMin: 30, heightRange: 45, widthMin: 28, widthRange: 35 },
@@ -869,5 +1029,13 @@ export function createTrack(scene: THREE.Scene, config: TrackConfig = TRACK_PRES
       return new THREE.Vector3(p.x, elevationAt(p.x, p.z), p.z);
     },
     night: config.night,
+    /**
+     * Regira todos os sprites pra encarar a câmera. Precisa ser chamado uma vez por frame, com o
+     * ângulo pra onde a câmera está olhando — senão as plantas ficam de perfil (praticamente
+     * invisíveis, já que são planos sem espessura).
+     */
+    updateBillboards(cameraYaw: number) {
+      for (const group of billboardGroups) group.update(cameraYaw);
+    },
   };
 }

@@ -11,6 +11,10 @@ export class CarState extends Schema {
   @type("number") speed: number = 0;
 
   @type("number") lapCount: number = 0;
+  /** cargas de turbo que sobraram */
+  @type("number") nitroCharges: number = 0;
+  /** se o turbo está queimando agora — o client usa só pra acender o indicador */
+  @type("boolean") nitroActive: boolean = false;
   /**
    * Score de ranking, monotônico ao longo da corrida: `voltas * nWaypoints + waypoints já passados`.
    * Sincronizado porque o CLIENT não deve recontar progresso por conta própria — ele fazia isso em
@@ -25,4 +29,6 @@ export class CarState extends Schema {
   throttle: number = 0;
   brake: number = 0;
   steer: number = 0;
+  /** segundos restantes da carga de turbo em uso; só no servidor, não sincroniza */
+  nitroTimer: number = 0;
 }

@@ -1,3 +1,6 @@
+import { getTheme, setTheme } from "./retro";
+import type { VisualTheme } from "./retro";
+
 export interface RacerDisplay {
   label: string;
   color: number;
@@ -33,6 +36,16 @@ function ordinal(n: number): string {
 }
 
 const TACHO_SEGMENTS = 20;
+
+// animação usada pelo aviso de reserva do combustível (ver createDashHud)
+const dashStyleTag = document.createElement("style");
+dashStyleTag.textContent = `
+  @keyframes fuelBlink {
+    0%, 50% { opacity: 1; }
+    50.01%, 100% { opacity: 0.35; }
+  }
+`;
+document.head.appendChild(dashStyleTag);
 
 /** Velocímetro estilo LCD vermelho com barra de tacômetro diagonal, tipo painel de corrida SNES. */
 export function createSpeedHud(maxSpeedKmh: number) {
@@ -88,6 +101,117 @@ export function createSpeedHud(maxSpeedKmh: number) {
       segments.forEach((seg, i) => {
         seg.style.opacity = i < lit ? "1" : "0.2";
       });
+    },
+  };
+}
+
+/**
+ * Painel de bordo: marcha e nitro embaixo à esquerda, combustível numa barra vertical à direita —
+ * o mesmo arranjo do Top Gear.
+ *
+ * O ponteiro de combustível fica DENTRO da barra em vez de ao lado dela, pra não brigar por espaço
+ * com o leaderboard no celular.
+ */
+export function createDashHud(mobile = false) {
+  const escala = mobile ? 0.78 : 1;
+
+  // ---- marcha + nitro, canto inferior esquerdo ----
+  const canto = document.createElement("div");
+  canto.style.cssText = `
+    position: fixed; left: 16px; bottom: 16px; z-index: 10; pointer-events: none;
+    display: flex; flex-direction: column; gap: ${6 * escala}px; align-items: flex-start;
+  `;
+
+  const nitro = document.createElement("div");
+  nitro.style.cssText = retroPanelStyle(`
+    font-size: ${16 * escala}px; color: #7ef0ff; letter-spacing: 2px; padding: ${5 * escala}px ${10 * escala}px;
+  `);
+  canto.appendChild(nitro);
+
+  const marcha = document.createElement("div");
+  marcha.style.cssText = retroPanelStyle(`
+    font-size: ${18 * escala}px; color: #fff; letter-spacing: 2px; padding: ${5 * escala}px ${10 * escala}px;
+  `);
+  canto.appendChild(marcha);
+  document.body.appendChild(canto);
+
+  // ---- combustível, barra vertical na direita ----
+  // Ancorado por BAIXO, e não centralizado na vertical: o leaderboard também mora na direita e
+  // desce quase até a metade da tela com 10 carros, então um medidor centralizado ficava escondido
+  // atrás dele. Aqui ele ocupa a faixa livre entre o leaderboard e o badge de posição.
+  const alturaBarra = (mobile ? 110 : 150) * escala;
+  const fuelWrap = document.createElement("div");
+  fuelWrap.style.cssText = `
+    position: fixed; right: 16px; bottom: ${(mobile ? 104 : 96) * escala}px;
+    z-index: 10; pointer-events: none; display: flex; flex-direction: column;
+    align-items: center; gap: 3px;
+    font-family: ${RETRO_FONT}; font-weight: 700; font-size: ${11 * escala}px; color: #fff;
+  `;
+
+  const topoF = document.createElement("div");
+  topoF.textContent = "F";
+  fuelWrap.appendChild(topoF);
+
+  const trilho = document.createElement("div");
+  trilho.style.cssText = `
+    width: ${18 * escala}px; height: ${alturaBarra}px; background: #14142b;
+    border: 3px solid #fff; box-shadow: 3px 3px 0 #000;
+    display: flex; flex-direction: column-reverse; overflow: hidden;
+  `;
+  fuelWrap.appendChild(trilho);
+
+  // a barra é feita de blocos separados, não de uma barra contínua — é o que dá o look de
+  // medidor segmentado de painel 16-bit
+  const BLOCOS = 14;
+  const blocos: HTMLDivElement[] = [];
+  for (let i = 0; i < BLOCOS; i++) {
+    const bloco = document.createElement("div");
+    bloco.style.cssText = `flex: 1; margin: 1px; background: #2a1010;`;
+    trilho.appendChild(bloco);
+    blocos.push(bloco);
+  }
+
+  const baseE = document.createElement("div");
+  baseE.textContent = "E";
+  fuelWrap.appendChild(baseE);
+  document.body.appendChild(fuelWrap);
+
+  let piscando = false;
+
+  return {
+    /**
+     * @param gear marcha atual (0 = ré, senão 1..6)
+     * @param nitroCharges cargas de nitro sobrando
+     * @param nitroActive se o turbo está queimando agora
+     * @param fuel 0..1
+     */
+    update(gear: number, nitroCharges: number, nitroActive: boolean, fuel: number) {
+      marcha.textContent = gear === 0 ? "MARCHA R" : `MARCHA ${gear}`;
+      marcha.style.color = gear === 0 ? "#ff8c1a" : "#fff";
+
+      nitro.textContent = `N x ${nitroCharges}`;
+      if (nitroActive) {
+        nitro.style.color = "#fff";
+        nitro.style.background = "#0a6b7a";
+      } else {
+        nitro.style.color = nitroCharges > 0 ? "#7ef0ff" : "#4a5560";
+        nitro.style.background = "#14142b";
+      }
+
+      const acesos = Math.round(Math.max(0, Math.min(1, fuel)) * BLOCOS);
+      // vermelho na reserva, âmbar no meio, verde cheio — leitura instantânea sem precisar de número
+      const cor = fuel > 0.5 ? "#3fd15a" : fuel > 0.22 ? "#ffd23f" : "#ff3b3b";
+      blocos.forEach((bloco, i) => {
+        bloco.style.background = i < acesos ? cor : "#2a1010";
+      });
+
+      // na reserva a barra inteira pisca, que é o aviso que o jogo original dá
+      const deveriaPiscar = fuel <= 0.15;
+      if (deveriaPiscar !== piscando) {
+        piscando = deveriaPiscar;
+        trilho.style.borderColor = deveriaPiscar ? "#ff3b3b" : "#fff";
+        trilho.style.animation = deveriaPiscar ? "fuelBlink 0.6s steps(1) infinite" : "none";
+      }
     },
   };
 }
@@ -428,6 +552,8 @@ const DEFAULT_PLAYER_NAME = "JOGADOR";
 export interface MobileControlState {
   throttle: boolean;
   brake: boolean;
+  /** pulso: vira true no toque e volta pra false sozinho, igual à tecla do teclado */
+  nitro: boolean;
   steer: number;
 }
 
@@ -556,7 +682,71 @@ export function createModeSelectScreen(onSelect: (mode: "solo" | "online") => vo
     list.appendChild(button);
   }
 
+  el.appendChild(createThemePicker());
   document.body.appendChild(el);
+}
+
+/**
+ * Escolha do tema visual, na tela inicial.
+ *
+ * Trocar recarrega a página de propósito: o antialias é decidido na criação do renderer, então não
+ * dá pra trocar de verdade sem remontar tudo. Como isso só aparece na primeira tela, recarregar
+ * não custa nada — e é bem mais simples (e confiável) do que reconstruir a cena viva.
+ */
+function createThemePicker(): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.style.cssText = "margin-top: 40px; display: flex; flex-direction: column; align-items: center; gap: 10px;";
+
+  const label = document.createElement("div");
+  label.style.cssText = `
+    font-size: 12px; letter-spacing: 2px; color: #8ecbff; text-transform: uppercase;
+  `;
+  label.textContent = "Visual";
+  wrap.appendChild(label);
+
+  const row = document.createElement("div");
+  row.style.cssText = "display: flex; gap: 10px;";
+  wrap.appendChild(row);
+
+  const opcoes: { theme: VisualTheme; label: string; dica: string }[] = [
+    { theme: "retro", label: "Retrô", dica: "Pixel grandão e luz chapada, tipo 16-bit" },
+    { theme: "moderno", label: "Moderno", dica: "Resolução cheia, com sombra e antialias" },
+  ];
+
+  const dica = document.createElement("div");
+  dica.style.cssText = "font-size: 11px; letter-spacing: 1px; color: #7a7f99; height: 14px;";
+
+  const botoes: HTMLButtonElement[] = [];
+  function pintar() {
+    const atual = getTheme();
+    opcoes.forEach((opt, i) => {
+      const ativo = opt.theme === atual;
+      botoes[i].style.background = ativo ? "#ffe14d" : "#14142b";
+      botoes[i].style.color = ativo ? "#14142b" : "#8a8fa8";
+      if (ativo) dica.textContent = opt.dica;
+    });
+  }
+
+  for (const opt of opcoes) {
+    const button = document.createElement("button");
+    button.textContent = opt.label;
+    button.style.cssText = `
+      font-family: ${RETRO_FONT}; font-size: 13px; font-weight: 700; letter-spacing: 1px;
+      text-transform: uppercase; padding: 8px 20px; border: 3px solid #fff;
+      box-shadow: 3px 3px 0 #000; cursor: pointer;
+    `;
+    button.addEventListener("click", () => {
+      if (getTheme() === opt.theme) return;
+      setTheme(opt.theme);
+      window.location.reload();
+    });
+    botoes.push(button);
+    row.appendChild(button);
+  }
+
+  wrap.appendChild(dica);
+  pintar();
+  return wrap;
 }
 
 /** Depois de escolher "Sala Online": criar uma sala nova (vira host) ou entrar com um código. */
@@ -1094,7 +1284,7 @@ export function createCarSelectScreen(cars: CarOption[], onSelect: (id: string) 
 }
 
 export function createMobileControls(onChange: (state: MobileControlState) => void) {
-  const state: MobileControlState = { throttle: false, brake: false, steer: 0 };
+  const state: MobileControlState = { throttle: false, brake: false, nitro: false, steer: 0 };
 
   const container = document.createElement("div");
   container.style.cssText = `
@@ -1261,8 +1451,25 @@ export function createMobileControls(onChange: (state: MobileControlState) => vo
   bindToggle(throttleButton, "throttle");
   bindToggle(brakeButton, "brake");
 
+  // nitro é um PULSO, não um estado mantido: dispara no toque e volta a false no frame seguinte,
+  // igual à tecla de espaço no teclado. Sem isso, segurar o dedo gastaria as três cargas seguidas.
+  const nitroButton = document.createElement("div");
+  nitroButton.textContent = "N";
+  nitroButton.style.cssText = `
+    width: 100%; padding: 10px 0; margin-top: 8px; text-align: center;
+    font-family: ${RETRO_FONT}; font-size: 20px; font-weight: 700; color: #fff;
+    background: #0a6b7a; border: 3px solid #fff; box-shadow: 3px 3px 0 #000;
+    pointer-events: auto; touch-action: none; user-select: none;
+  `;
+  nitroButton.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    commitState({ nitro: true });
+    commitState({ nitro: false });
+  });
+
   rightPanel.appendChild(throttleButton);
   rightPanel.appendChild(brakeButton);
+  rightPanel.appendChild(nitroButton);
   wrapper.appendChild(steeringCard);
   wrapper.appendChild(rightPanel);
   document.body.appendChild(container);

@@ -1,7 +1,15 @@
 import * as THREE from "three";
 import { createTrack, elevationAt, ROAD_WIDTH, findNearestWaypoint, TRACK_PRESETS } from "./track";
 import type { TrackConfig } from "./track";
-import { MAX_SPEED } from "@shared/physics";
+import {
+  MAX_SPEED,
+  NITRO_CHARGES,
+  NITRO_DURATION,
+  FUEL_DRAIN_PER_SECOND,
+  FUEL_DRAIN_NITRO_MULTIPLIER,
+  gearForSpeed,
+} from "@shared/physics";
+import { VISUAL, ART, wantsAntialias, applyResolution, createSkyTexture } from "./retro";
 import { TOTAL_LAPS, MIN_RACERS, MAX_RACERS } from "@shared/rules";
 import { createCarMesh, CarController, AICarController } from "./car";
 import { resolveCarCollisions } from "./collision";
@@ -10,6 +18,7 @@ import { createLobby, joinLobby, getStateCallbacks } from "./network";
 import type { Room } from "colyseus.js";
 import {
   createSpeedHud,
+  createDashHud,
   createLapHud,
   createLeaderboardHud,
   createLapBanner,
@@ -34,32 +43,33 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
 
 const camera = new THREE.PerspectiveCamera(
-  65,
+  ART.camera.fov,
   window.innerWidth / window.innerHeight,
   0.1,
   700
 );
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = true;
+const renderer = new THREE.WebGLRenderer({ antialias: wantsAntialias });
+renderer.shadowMap.enabled = !VISUAL.flatLighting;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 app.appendChild(renderer.domElement);
+
+// resolução interna baixa + esticada com pixel quadrado (cuida do resize também)
+applyResolution(renderer, camera);
 
 document.body.style.setProperty("user-select", "none");
 document.body.style.setProperty("-webkit-user-select", "none");
 document.body.style.setProperty("-moz-user-select", "none");
 document.body.style.setProperty("-ms-user-select", "none");
 
-window.addEventListener("resize", () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
-
 // input compartilhado entre o modo solo e o multiplayer (captura de teclado + controles mobile)
 const keys = { w: false, a: false, s: false, d: false };
 const mobileInput = { throttle: false, brake: false, steer: 0 };
+/**
+ * Nitro é um PULSO, não um estado: cada toque na tecla/botão consome no máximo uma carga, e
+ * segurar não gasta o resto. Quem consome zera de volta.
+ */
+const nitroRequest = { pending: false };
 const isMobileDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
 
 if (isMobileDevice) {
@@ -67,6 +77,7 @@ if (isMobileDevice) {
     mobileInput.throttle = state.throttle;
     mobileInput.brake = state.brake;
     mobileInput.steer = state.steer;
+    if (state.nitro) nitroRequest.pending = true;
   });
 }
 
@@ -94,9 +105,39 @@ document.addEventListener(
   { passive: false }
 );
 
+let nitroKeyHeld = false;
+
 function setKey(key: string, value: boolean) {
   const k = key.toLowerCase();
   if (k === "w" || k === "a" || k === "s" || k === "d") keys[k] = value;
+
+  if (key === " " || k === "shift") {
+    // Só dispara na DESCIDA da tecla. Sem esse controle, o auto-repeat do teclado manda keydown
+    // sem parar enquanto a tecla está apertada — e como cada carga dura pouco, segurar o espaço
+    // queimava as três em sequência sem o jogador perceber.
+    if (value && !nitroKeyHeld) nitroRequest.pending = true;
+    nitroKeyHeld = value;
+  }
+}
+
+/** Consome o pedido de turbo pendente, se houver. */
+function takeNitroRequest(): boolean {
+  if (!nitroRequest.pending) return false;
+  nitroRequest.pending = false;
+  return true;
+}
+
+const cameraForward = new THREE.Vector3();
+
+/**
+ * Ângulo em que os sprites precisam ser girados pra encarar a câmera.
+ *
+ * Usa a direção pra onde a câmera olha, invertida — ou seja, alinha os sprites com a TELA, não com
+ * o ponto da câmera. É o que evita que uma planta na beirada do campo de visão apareça torta.
+ */
+function cameraYaw(): number {
+  camera.getWorldDirection(cameraForward);
+  return Math.atan2(-cameraForward.x, -cameraForward.z);
 }
 
 interface Racer {
@@ -112,12 +153,18 @@ interface Racer {
  * e a função de posicionamento em grid na largada. Retorna só o que os dois modos precisam.
  */
 function initTrackScene(config: TrackConfig) {
-  // à noite tem menos PointLight que antes (ver NIGHT_LAMP_LIGHT_EVERY em track.ts), então a luz
-  // ambiente sobe um pouco pra pista não virar um breu entre um poste e outro
-  scene.add(new THREE.AmbientLight(0xffffff, config.night ? 0.22 : 0.6));
-  const sun = new THREE.DirectionalLight(0xffffff, config.night ? 0.08 : 0.9);
+  // Luz chapada: o SNES não tinha luz dinâmica nenhuma, então o ambiente vai quase no talo e o
+  // "sol" fica só com o suficiente pra dar alguma leitura de volume. À noite o ambiente ainda sobe
+  // um pouco pra pista não virar um breu entre um poste e outro (ver NIGHT_LAMP_LIGHT_EVERY).
+  const ambientDay = VISUAL.flatLighting ? 0.9 : 0.6;
+  const ambientNight = VISUAL.flatLighting ? 0.35 : 0.22;
+  const sunDay = VISUAL.flatLighting ? 0.35 : 0.9;
+  const sunNight = VISUAL.flatLighting ? 0.05 : 0.08;
+
+  scene.add(new THREE.AmbientLight(0xffffff, config.night ? ambientNight : ambientDay));
+  const sun = new THREE.DirectionalLight(0xffffff, config.night ? sunNight : sunDay);
   sun.position.set(60, 100, 40);
-  sun.castShadow = true;
+  sun.castShadow = !VISUAL.flatLighting;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.left = -120;
   sun.shadow.camera.right = 120;
@@ -127,19 +174,28 @@ function initTrackScene(config: TrackConfig) {
   sun.shadow.camera.far = 300;
   scene.add(sun);
 
-  scene.background = new THREE.Color(config.night ? 0x0a0e1f : 0x87ceeb);
-  scene.fog = new THREE.Fog(config.night ? 0x0a0e1f : 0x87ceeb, config.night ? 60 : 100, config.night ? 220 : 380);
+  // O fog fecha na cor do HORIZONTE do mapa, e os morros lá longe são pintados com essa mesma
+  // cor — os dois viram uma faixa sólida só, com uma linha nítida contra o céu. É assim que o
+  // horizonte do Top Gear se parece; fechar o fog na cor do céu dissolveria essa linha.
+  // o céu é sempre um degradê; o que muda entre os temas é a QUANTIDADE de degraus dele —
+  // poucos degraus viram bandas visíveis, muitos viram um degradê liso (ver VISUAL.skyBands)
+  scene.background = createSkyTexture(config.skyColor, lightenColor(config.skyColor, 0.28));
+  scene.fog = new THREE.Fog(config.horizonColor, config.night ? 60 : 110, config.night ? 220 : 400);
 
   // waypoints, índice/direção de largada e vagas da grid saem todos de `@shared/trackGeometry`,
   // via createTrack — é a MESMA fonte que o servidor usa no multiplayer
-  const { waypoints, startIndex, startHeading, gridPosition } = createTrack(scene, config);
+  const { waypoints, startIndex, startHeading, gridPosition, updateBillboards } = createTrack(
+    scene,
+    config
+  );
 
-  return { waypoints, startIdx: startIndex, startHeading, gridPosition };
+  return { waypoints, startIdx: startIndex, startHeading, gridPosition, updateBillboards };
 }
 
 /** Modo solo: física 100% local, contra bots. */
 function startGame(config: TrackConfig, carColor: number, playerName: string) {
-  const { waypoints, startIdx, startHeading, gridPosition } = initTrackScene(config);
+  const { waypoints, startIdx, startHeading, gridPosition, updateBillboards } =
+    initTrackScene(config);
 
   const carMesh = createCarMesh(carColor);
   carMesh.position.copy(gridPosition(0));
@@ -196,6 +252,7 @@ function startGame(config: TrackConfig, carColor: number, playerName: string) {
   const allCars: CarController[] = racers.map((r) => r.controller);
 
   const speedHud = createSpeedHud(car.maxSpeed * 6);
+  const dashHud = createDashHud(isMobileDevice);
   const lapHud = createLapHud();
   const leaderboardHud = createLeaderboardHud(isMobileDevice);
   const minimap = createMinimap(waypoints);
@@ -207,6 +264,12 @@ function startGame(config: TrackConfig, carColor: number, playerName: string) {
   const playerRacer = racers[0];
   let raceOver = false;
   let raceStarted = false;
+
+  // turbo e combustível do jogador. No solo tudo é local; no multiplayer o turbo é do servidor
+  // (ver startMultiplayerGame), porque ele mexe na velocidade e a velocidade é autoritativa.
+  let nitroCharges = NITRO_CHARGES;
+  let nitroTimer = 0;
+  let fuel = 1;
 
   // se o carro sair da pista, ele volta pro último ponto onde estava na pista (perde o "atalho")
   const OFF_TRACK_DISTANCE = ROAD_WIDTH / 2 + 4;
@@ -235,11 +298,24 @@ function startGame(config: TrackConfig, carColor: number, playerName: string) {
       if (keys.d) steer += 1;
       if (mobileInput.steer !== 0) steer = mobileInput.steer;
 
+      if (takeNitroRequest() && nitroTimer <= 0 && nitroCharges > 0) {
+        nitroCharges--;
+        nitroTimer = NITRO_DURATION;
+      }
+      if (nitroTimer > 0) nitroTimer = Math.max(0, nitroTimer - dt);
+      const nitroAtivo = nitroTimer > 0;
+
+      const throttle = keys.w || mobileInput.throttle ? 1 : 0;
       car.update(dt, {
-        throttle: keys.w || mobileInput.throttle ? 1 : 0,
+        throttle,
         brake: keys.s || mobileInput.brake ? 1 : 0,
         steer,
+        nitro: nitroAtivo,
       });
+
+      // o tanque só gasta com o pé no acelerador, e o turbo bebe bem mais
+      const consumo = FUEL_DRAIN_PER_SECOND * (nitroAtivo ? FUEL_DRAIN_NITRO_MULTIPLIER : 1);
+      if (throttle > 0) fuel = Math.max(0, fuel - consumo * dt);
 
       for (const ai of aiCars) {
         ai.updateAI(dt);
@@ -289,6 +365,7 @@ function startGame(config: TrackConfig, carColor: number, playerName: string) {
       Math.abs(car.speed) * 6,
       raceStarted ? formatTime(playerRacer.progress.currentLapElapsed()) : "0'00\"00"
     );
+    dashHud.update(gearForSpeed(car.speed), nitroCharges, nitroTimer > 0, fuel);
     lapHud.update(
       playerRacer.progress.lapCount,
       TOTAL_LAPS,
@@ -318,22 +395,28 @@ function startGame(config: TrackConfig, carColor: number, playerName: string) {
     );
 
     const behind = new THREE.Vector3(
-      Math.sin(car.heading) * -10,
-      4.5,
-      Math.cos(car.heading) * -10
+      Math.sin(car.heading) * -ART.camera.distance,
+      ART.camera.height,
+      Math.cos(car.heading) * -ART.camera.distance
     );
     const desiredCameraPos = carMesh.position.clone().add(behind);
     camera.position.lerp(desiredCameraPos, 1 - Math.pow(0.001, dt));
     camera.lookAt(
       carMesh.position.x,
-      carMesh.position.y + 1,
+      carMesh.position.y + ART.camera.lookAtHeight,
       carMesh.position.z
     );
 
+    updateBillboards(cameraYaw());
     renderer.render(scene, camera);
   }
 
   animate();
+}
+
+/** Clareia uma cor misturando com branco — usado só pra base do degradê do céu. */
+function lightenColor(color: number, amount: number): number {
+  return new THREE.Color(color).lerp(new THREE.Color(0xffffff), amount).getHex();
 }
 
 /** Interpola ângulos pelo caminho mais curto (evita o "giro errado" ao cruzar o limite -PI/PI). */
@@ -355,7 +438,7 @@ function lerpAngle(from: number, to: number, t: number): number {
  * reconstruir a pista do zero a cada corrida).
  */
 function startMultiplayerGame(config: TrackConfig, room: Room) {
-  const { waypoints, startHeading, gridPosition } = initTrackScene(config);
+  const { waypoints, startHeading, gridPosition, updateBillboards } = initTrackScene(config);
 
   const $ = getStateCallbacks(room);
 
@@ -383,7 +466,13 @@ function startMultiplayerGame(config: TrackConfig, room: Room) {
   }
 
   const speedHud = createSpeedHud(MAX_SPEED * 6);
+  const dashHud = createDashHud(isMobileDevice);
   const lapHud = createLapHud();
+
+  // combustível é local até no multiplayer: hoje ele não tem efeito nenhum na física, então não
+  // vale o custo de sincronizar. Se um dia acabar o tanque penalizar o carro, isso PRECISA virar
+  // estado do servidor, senão cada client castiga o seu num momento diferente.
+  let fuel = 1;
   const leaderboardHud = createLeaderboardHud(isMobileDevice);
   const minimap = createMinimap(waypoints);
   const positionBadge = createPositionBadge(isMobileDevice);
@@ -523,6 +612,7 @@ function startMultiplayerGame(config: TrackConfig, room: Room) {
     const racing = phase === "racing";
     if (racing && !wasRacing) {
       cars.forEach((r) => r.lapClock.reset());
+      fuel = 1;
       // o servidor zera throttle/brake/steer no spawn, então o cache de "já mandei isso" tem que
       // ser invalidado junto — senão um input que não mudou desde a corrida anterior nunca sairia
       invalidateSentInput();
@@ -537,6 +627,10 @@ function startMultiplayerGame(config: TrackConfig, room: Room) {
       if (keys.a) steer -= 1;
       if (keys.d) steer += 1;
       if (mobileInput.steer !== 0) steer = mobileInput.steer;
+
+      // o turbo é decidido pelo SERVIDOR (mexe na velocidade, que é autoritativa) — o client só
+      // avisa que o jogador apertou, e lê de volta quantas cargas sobraram
+      if (takeNitroRequest()) room.send("nitro");
 
       const throttle = keys.w || mobileInput.throttle ? 1 : 0;
       const brake = keys.s || mobileInput.brake ? 1 : 0;
@@ -577,9 +671,22 @@ function startMultiplayerGame(config: TrackConfig, room: Room) {
 
     if (localCar) {
       const localState = room.state.cars.get(room.sessionId);
+      const localSpeed = localState ? localState.speed : 0;
       speedHud.update(
-        localState ? Math.abs(localState.speed) * 6 : 0,
+        Math.abs(localSpeed) * 6,
         racing ? formatTime(localCar.lapClock.currentElapsed()) : "0'00\"00"
+      );
+
+      const nitroAtivo = localState ? localState.nitroActive === true : false;
+      if (racing && Math.abs(localSpeed) > 0.1) {
+        const consumo = FUEL_DRAIN_PER_SECOND * (nitroAtivo ? FUEL_DRAIN_NITRO_MULTIPLIER : 1);
+        fuel = Math.max(0, fuel - consumo * dt);
+      }
+      dashHud.update(
+        gearForSpeed(localSpeed),
+        localState ? localState.nitroCharges : 0,
+        nitroAtivo,
+        fuel
       );
       lapHud.update(
         localCar.lapCount,
@@ -611,15 +718,20 @@ function startMultiplayerGame(config: TrackConfig, room: Room) {
       );
 
       const behind = new THREE.Vector3(
-        Math.sin(localCar.mesh.rotation.y) * -10,
-        4.5,
-        Math.cos(localCar.mesh.rotation.y) * -10
+        Math.sin(localCar.mesh.rotation.y) * -ART.camera.distance,
+        ART.camera.height,
+        Math.cos(localCar.mesh.rotation.y) * -ART.camera.distance
       );
       const desiredCameraPos = localCar.mesh.position.clone().add(behind);
       camera.position.lerp(desiredCameraPos, 1 - Math.pow(0.001, dt));
-      camera.lookAt(localCar.mesh.position.x, localCar.mesh.position.y + 1, localCar.mesh.position.z);
+      camera.lookAt(
+        localCar.mesh.position.x,
+        localCar.mesh.position.y + ART.camera.lookAtHeight,
+        localCar.mesh.position.z
+      );
     }
 
+    updateBillboards(cameraYaw());
     renderer.render(scene, camera);
   }
 

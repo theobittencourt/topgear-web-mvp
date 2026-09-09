@@ -3,7 +3,13 @@ import { RaceState } from "./RaceState";
 import { CarState } from "./CarState";
 import { buildTrackPath } from "../shared/trackGeometry";
 import type { TrackPath } from "../shared/trackGeometry";
-import { stepCar, normalizeAngle, MAX_SPEED } from "../shared/physics";
+import {
+  stepCar,
+  normalizeAngle,
+  MAX_SPEED,
+  NITRO_DURATION,
+  NITRO_CHARGES,
+} from "../shared/physics";
 import {
   TOTAL_LAPS,
   WAYPOINT_RADIUS,
@@ -94,6 +100,17 @@ export class RaceRoom extends Room<RaceState> {
       car.throttle = clampFinite(message?.throttle, 0, 1);
       car.brake = clampFinite(message?.brake, 0, 1);
       car.steer = clampFinite(message?.steer, -1, 1);
+    });
+
+    this.onMessage("nitro", (client) => {
+      if (this.state.phase !== "racing") return;
+      const car = this.state.cars.get(client.sessionId);
+      if (!car || car.isBot) return;
+      // uma carga por vez: segurar o botão não empilha nem renova
+      if (car.nitroTimer > 0 || car.nitroCharges <= 0) return;
+      car.nitroCharges--;
+      car.nitroTimer = NITRO_DURATION;
+      car.nitroActive = true;
     });
 
     this.onMessage("addBot", (client) => {
@@ -194,6 +211,9 @@ export class RaceRoom extends Room<RaceState> {
     car.speed = 0;
     car.lapCount = 0;
     car.progress = 0;
+    car.nitroCharges = NITRO_CHARGES;
+    car.nitroTimer = 0;
+    car.nitroActive = false;
     car.throttle = 0;
     car.brake = 0;
     car.steer = 0;
@@ -233,9 +253,19 @@ export class RaceRoom extends Room<RaceState> {
     this.state.cars.forEach((car, id) => {
       const ai = car.isBot ? this.botAI.get(id) : undefined;
       if (ai) this.driveBot(car, ai, dt);
+
+      if (car.nitroTimer > 0) {
+        car.nitroTimer -= dt;
+        if (car.nitroTimer <= 0) {
+          car.nitroTimer = 0;
+          car.nitroActive = false;
+        }
+      }
+
       // MESMA função de física que o client roda no modo solo (shared/physics.ts) — o CarState já
       // tem x/z/heading/speed e throttle/brake/steer com os nomes que ela espera
       stepCar(car, car, dt);
+      // o teto de velocidade do bot não vale enquanto ele estivesse no turbo (bot não usa turbo hoje)
       if (ai && car.speed > ai.topSpeed) car.speed = ai.topSpeed;
       this.updateProgress(id, car);
     });

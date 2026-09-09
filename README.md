@@ -5,13 +5,16 @@ Tem modo solo contra bots e modo online com sala privada, servidor autoritativo 
 
 ## O que tem
 
-- pista gerada por código, com elevação, túnel, meio-fio em zebra e cenário (árvores, montanhas, nuvens, arquibancada)
-- 3 mapas: Estádio Clássico, Circuito Litoral e Circuito Noturno (com iluminação de postes)
+- pista gerada por código, com elevação, túnel, meio-fio em zebra, acostamento e faixas alternadas de chão
+- cenário em sprite 2D (palmeiras, pinheiros, cactos, arbustos) e placas de seta avisando curva
+- 4 circuitos, cada um com traçado e paleta próprios: **Vale Esmeralda**, **Costa Palmares**, **Distrito Meia-Noite** e **Dunas de Ocre**
+- dois temas visuais: **Retrô** (resolução interna baixa, pixel grandão, luz chapada) e **Moderno** (resolução cheia, com sombra)
 - 6 cores de carro pra escolher
 - **modo solo**: corrida de 3 voltas contra 9 bots
 - **modo online**: sala privada com código pra compartilhar, de 5 a 10 carros (jogadores e/ou bots), com o host controlando quem entra, quem sai e quando larga
 - física do carro idêntica no solo e no online (o mesmo código roda nos dois lados — ver [Código compartilhado](#código-compartilhado))
-- HUD estilo retrô SNES: velocímetro com tacômetro, minimapa, tempo de volta, melhor volta, leaderboard ao vivo e badge de posição
+- turbo com 3 cargas por corrida, funcionando igual no solo e no online
+- HUD estilo retrô SNES: velocímetro com tacômetro, minimapa, tempo de volta, melhor volta, leaderboard ao vivo, badge de posição, marcha, cargas de turbo e medidor de combustível
 - controles mobile por toque (acelerador/freio e joystick de direção)
 - contagem regressiva de largada, banner de volta e tela de vitória
 
@@ -72,20 +75,23 @@ cd server && npm run build && npm start   # servidor
 | S | frear / ré |
 | A | virar pra esquerda |
 | D | virar pra direita |
+| Espaço ou Shift | turbo (3 cargas por corrida) |
 
 ### Mobile
 
-Os controles de toque aparecem sozinhos em telas sensíveis ao toque: botões de acelerar/frear de um
-lado e o joystick de direção do outro.
+Os controles de toque aparecem sozinhos em telas sensíveis ao toque: botões de acelerar, frear e
+turbo (`N`) de um lado, joystick de direção do outro.
 
 ## Estrutura
 
 ```
 src/                     client
   main.ts                monta a cena, o fluxo de telas e os loops de jogo (solo e online)
-  track.ts               malha 3D da pista, elevação e cenário instanciado
+  track.ts               malha 3D da pista, elevação, paleta e cenário instanciado
   car.ts                 modelo do carro, controle do jogador e IA dos bots
   ui.ts                  HUD e todas as telas (DOM puro, sem framework)
+  retro.ts               tema visual (retrô/moderno) e direção de arte
+  sprites.ts             sprites 2D de beira de pista (vegetação e placas de curva)
   collision.ts           colisão entre carros tipo bumper car
   raceTimer.ts           progresso/voltas no solo e cronômetro de volta no online
   network.ts             conexão com o servidor Colyseus
@@ -114,6 +120,26 @@ Se essas coisas divergirem entre os dois lados, os sintomas são silenciosos e c
 dirigindo por cima da grama, carro que não obedece direito, volta que não conta) — por isso existe
 um lugar só.
 
+## Tema visual
+
+Na tela inicial dá pra escolher entre **Retrô** e **Moderno**. A escolha fica salva no
+`localStorage` e recarrega a página — o antialias é decidido lá na criação do renderer, então não
+dá pra trocar de verdade sem remontar tudo. Como a troca só aparece na primeira tela, recarregar
+não custa nada.
+
+| | Retrô | Moderno |
+| --- | --- | --- |
+| Resolução | interna baixa, esticada com pixel quadrado | nativa, com antialias |
+| Luz | chapada, sem sombra dinâmica | sombra e luz suave |
+| Céu | 16 bandas visíveis | degradê liso |
+| Nuvens | não | sim |
+
+O que **não** entra nessa conta é a direção de arte — faixas no chão, vegetação em sprite, placas
+de curva, acostamento e a paleta dos mapas valem nos dois temas. Isso não é "coisa de retrô", é o
+que faz o jogo parecer um arcade de corrida; o tema mexe só em fidelidade gráfica. Os dois grupos
+de ajuste ficam separados em `src/retro.ts` (`VISUAL` e `ART`), com cada item ligando/desligando
+sozinho pra dar pra achar o ponto certo mexendo num de cada vez.
+
 ## Modo online, por dentro
 
 O servidor é autoritativo: o client só manda intenção (`throttle`, `brake`, `steer`) e desenha o
@@ -126,5 +152,8 @@ pode reiniciar, e a sala volta pro `waiting` com os mesmos carros, reaproveitand
 
 - No online ainda não tem colisão entre carros nem recuperação de pista — dá pra cortar caminho
   pela grama. No solo os dois existem.
+- O combustível gasta de verdade, mas o tanque vazio **não tem penalidade nenhuma** ainda: hoje é
+  só tensão. Se um dia passar a penalizar, ele precisa virar estado do servidor (ver PROJETO.md).
+- Os bots não usam turbo.
 - Reiniciar no modo solo recarrega a página (mais simples do que resetar todo o estado na mão).
 - Os carros são primitivas geométricas, não assets modelados.

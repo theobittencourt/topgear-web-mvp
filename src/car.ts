@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { elevationAt } from "./track";
 import { stepCar, normalizeAngle, MAX_SPEED } from "@shared/physics";
+import type { DriveInput } from "@shared/physics";
 import { BOT_WAYPOINT_RADIUS } from "@shared/rules";
 
 export function createCarMesh(bodyColor: number = 0xe8e8e8): THREE.Group {
@@ -132,7 +133,7 @@ export class CarController {
     this.waypoints = waypoints;
   }
 
-  update(dt: number, input: { throttle: number; brake: number; steer: number }) {
+  update(dt: number, input: DriveInput) {
     // a física em si é a MESMA que o servidor roda no multiplayer (@shared/physics) — se as duas
     // divergissem, treinar no solo não ensinaria nada sobre como o carro se comporta online
     const k = this.kinematics;

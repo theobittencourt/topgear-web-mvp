@@ -26,12 +26,23 @@ export interface MapShape {
   cornerRadius: number;
 }
 
-export const DEFAULT_MAP_ID = "estadio";
+export const DEFAULT_MAP_ID = "vale";
 
+/**
+ * Só a FORMA de cada circuito. A cara dele (céu, cores, vegetação) fica em `TRACK_PRESETS`, no
+ * client — o servidor não precisa saber que cor tem o céu, mas precisa saber onde fica a pista.
+ *
+ * `cornerRadius` grande = curvas longas e abertas; pequeno = curvas mais fechadas e retas maiores.
+ */
 export const MAP_SHAPES: Record<string, MapShape> = {
-  estadio: { outerW: 210, outerH: 140, roadWidth: ROAD_WIDTH, cornerRadius: 46 },
-  litoral: { outerW: 260, outerH: 120, roadWidth: ROAD_WIDTH, cornerRadius: 40 },
-  noturno: { outerW: 190, outerH: 130, roadWidth: ROAD_WIDTH, cornerRadius: 42 },
+  // vale: o clássico, equilibrado — é o circuito de estreia
+  vale: { outerW: 210, outerH: 140, roadWidth: ROAD_WIDTH, cornerRadius: 46 },
+  // palmares: bem alongado, duas retas compridas pra abrir o motor
+  palmares: { outerW: 275, outerH: 115, roadWidth: ROAD_WIDTH, cornerRadius: 38 },
+  // meia-noite: o mais curto e apertado, curvas fechadas
+  medianoite: { outerW: 185, outerH: 130, roadWidth: ROAD_WIDTH, cornerRadius: 40 },
+  // dunas: o maior, curvas bem longas e abertas
+  dunas: { outerW: 250, outerH: 165, roadWidth: ROAD_WIDTH, cornerRadius: 58 },
 };
 
 export function mapShape(mapId: string): MapShape {

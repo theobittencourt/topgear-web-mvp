@@ -23,7 +23,7 @@ npm run dev
 ```
 Sobe em `http://localhost:2567`. O `--legacy-peer-deps` não é opcional (ver aprendizados).
 
-Controles: **W** acelera, **S** freia/ré, **A/D** viram.
+Controles: **W** acelera, **S** freia/ré, **A/D** viram, **espaço/shift** dispara o turbo.
 
 ## Funcionalidades
 
@@ -31,11 +31,15 @@ Controles: **W** acelera, **S** freia/ré, **A/D** viram.
 - [x] Pista oval (formato "estádio") com asfalto, meio-fio e grama
 - [x] Mapa maior com subidas e descidas, com a pista e a grama se encaixando direito (sem buracos/flutuação)
 - [x] Elevação suave e consistente em toda a pista (retas incluídas) — carro não afunda/flutua em nenhum trecho
-- [x] Visual "cara de corrida arcade": meio-fio em zebra vermelho/branco, linha de chegada quadriculada, linha central tracejada, calçada de concreto, árvores, arquibancada, postes de luz, sombras ligadas
+- [x] Visual "cara de corrida arcade": meio-fio em zebra vermelho/branco, linha de chegada quadriculada, linha central tracejada, arquibancada e postes de luz
 - [x] Túnel comprido na reta oposta à largada, com portais de concreto e luminárias de teto
-- [x] Árvores em vários anéis, nuvens em camadas e montanhas no horizonte pra dar profundidade
-- [x] 3 mapas configuráveis (Estádio Clássico, Circuito Litoral, Circuito Noturno), com painéis de patrocínio opcionais e iluminação noturna
-- [x] Cenário todo desenhado com `InstancedMesh` — o mapa estádio saiu de ~1278 draw calls pra 28
+- [x] Vegetação em vários anéis e morros no horizonte pra dar profundidade (nuvens só no tema Moderno)
+- [x] 4 circuitos com traçado e paleta próprios: Vale Esmeralda, Costa Palmares, Distrito Meia-Noite e Dunas de Ocre
+- [x] Faixas alternadas de chão dos dois lados da pista, acompanhando a elevação — a assinatura visual do gênero
+- [x] Acostamento claro entre o asfalto e a zebra
+- [x] Vegetação e placas de curva em sprite 2D que encaram a câmera
+- [x] Horizonte em faixa sólida: o fog fecha na cor dos morros, deixando uma linha nítida contra o céu
+- [x] Cenário todo desenhado com `InstancedMesh` — o mapa clássico saiu de ~1278 draw calls pra 28
 
 ### Carro e corrida
 - [x] Física simples (aceleração, atrito, curva dependente da velocidade)
@@ -44,6 +48,7 @@ Controles: **W** acelera, **S** freia/ré, **A/D** viram.
 - [x] Recuperação de pista: sair do asfalto por mais de meio segundo devolve o carro pro último ponto válido, com aviso "FORA DA PISTA!" (só no solo)
 - [x] Largada em grid com countdown "3, 2, 1, VAI!"
 - [x] Corrida de `TOTAL_LAPS` voltas, com tela de vitória e botão de reiniciar
+- [x] Turbo com 3 cargas por corrida (espaço/shift no teclado, botão `N` no mobile), funcionando igual no solo e no online
 - [x] 6 cores de carro pra escolher
 
 ### Modo solo
@@ -59,12 +64,17 @@ Controles: **W** acelera, **S** freia/ré, **A/D** viram.
 
 ### HUD
 - [x] Velocímetro digital (km/h) com barra de tacômetro
+- [x] Marcha, cargas de turbo e medidor de combustível segmentado (verde/âmbar/vermelho, piscando na reserva)
 - [x] Leaderboard ao vivo, minimapa, badge de posição, volta atual, última volta e melhor volta
 - [x] Cara retrô SNES: painéis com borda branca grossa e sombra deslocada preta (sem blur), fonte monoespaçada em caps-lock, countdown com cores de semáforo
 - [x] Tela inicial pra digitar o nickname (salvo no `localStorage`), seleção de modo, mapa e carro
+- [x] Escolha de tema visual (Retrô / Moderno) na tela inicial, salva entre sessões
 - [x] Controles mobile por toque, com zoom por pinça e double-tap bloqueados
 
 ### Pendente
+- [ ] Tanque vazio não penaliza nada — o combustível hoje é só tensão. Se passar a penalizar, precisa virar estado do servidor
+- [ ] Bots não usam turbo
+- [ ] Quantização de paleta (15-bit) num passe de pós-processamento, pra fechar de vez com o console
 - [ ] Assets do Blender (hoje só primitivas geométricas, mesmo com visual melhorado)
 - [ ] Colisão entre carros e recuperação de pista no modo ONLINE (hoje só no solo — dá pra cortar caminho pela grama numa sala online)
 - [ ] Bots muito rápidos/precisos pra quem está aprendendo a dirigir — considerar dificuldade progressiva
@@ -75,11 +85,13 @@ Controles: **W** acelera, **S** freia/ré, **A/D** viram.
 ## Arquivos principais
 
 ### Client (`src/`)
-- `track.ts` — malha 3D da pista (asfalto, meio-fio, calçada, saias, túnel), elevação e cenário instanciado
+- `track.ts` — malha 3D da pista (asfalto, acostamento, meio-fio, barrancos, túnel), elevação, paleta de cada mapa e cenário instanciado
 - `car.ts` — modelo do carro (`createCarMesh`), `CarController` (jogador) e `AICarController` (segue waypoints)
 - `collision.ts` — resolução de colisão entre carros por sobreposição de raio
 - `raceTimer.ts` — `RaceProgress` (progresso/voltas no solo) e `LapClock` (só cronômetro, usado no online)
 - `ui.ts` — HUD e todas as telas (DOM puro)
+- `retro.ts` — tema visual (`VISUAL`), direção de arte (`ART`) e a escala de resolução interna
+- `sprites.ts` — sprites 2D de beira de pista, desenhados em canvas e instanciados
 - `main.ts` — monta a cena, o fluxo de telas e os dois loops de jogo
 - `network.ts` — conexão com o servidor Colyseus
 
@@ -129,6 +141,22 @@ Controles: **W** acelera, **S** freia/ré, **A/D** viram.
 - **A vaga na grid é decidida pelo servidor** (`gridSlot`). O client chutava (`0` pra si mesmo, `cars.size + 1` pros outros), o que dava vagas trocadas em relação ao servidor pra quem entrava depois do host.
 - **`display: none` que nunca voltava**: o overlay do countdown se escondia no fim da sequência e o `start()` não restaurava o `display`. No solo isso nunca apareceu porque reiniciar recarrega a página — mas no online o reinício reaproveita a mesma sala, e a segunda corrida largava sem contagem nenhuma na tela. Moral: componente de UI reaproveitado precisa se re-inicializar no `start`, não só no construtor.
 - Reiniciar a corrida no solo só dá `location.reload()` — mais simples e sem risco de estado zumbi (timers, colisões, física) do que resetar tudo manualmente.
+
+### Visual e sensação de velocidade
+- **Upscale pixelado fica feio por IRREGULARIDADE, não por tamanho de bloco**: renderizar num buffer de 224 de altura e esticar pra uma janela qualquer dá um fator quebrado — uns pixels do jogo viram blocos de 4 na tela e outros de 5. É essa mistura que faz parecer sujo. Arredondando o fator de escala pra inteiro, todo bloco fica igual e o resultado fica limpo mesmo com pixel grande. O alvo padrão também subiu de 224 (fiel ao SNES, mas vira mosaico numa tela grande) pra 300.
+- **As faixas do chão estavam invisíveis, e o motivo era geométrico**: a pista é uma fita que sobe até ~13 unidades acima de um plano de grama chapado, com uma "saia" fechando o degrau. Faixas desenhadas no nível do chão ficavam lá embaixo, escondidas atrás da saia — de dentro do carro não dava pra ver nada. Resolvido fazendo o terreno listrado usar o MESMO perfil de elevação da pista, subindo e descendo colado nela.
+- **A calçada de concreto atrapalhava mais do que ajudava**: 12 unidades de concreto entre a zebra e a grama empurravam as faixas pra longe do asfalto. Na referência a sequência é pista, zebra e grama, sem nada no meio. Hoje ela é opcional (`ART.concreteSidewalk`) e vem desligada.
+- **O fog tem que fechar na cor do HORIZONTE, não na cor do céu**: pintando os morros distantes com a mesma cor em que a névoa fecha, os dois viram uma faixa sólida só, com uma linha nítida contra o céu — que é exatamente como o horizonte de um jogo desses se parece. Fechando o fog na cor do céu, as montanhas se dissolvem e a profundidade 3D fica evidente.
+- **Sprite de beira de pista com `THREE.Sprite` seria um draw call por planta**: com centenas delas isso desfaria todo o ganho do instancing. Como a câmera só gira em torno do Y, dá pra usar `InstancedMesh` de planos e recompor as matrizes com o mesmo ângulo a cada frame — algumas centenas de `compose` por frame não custam nada. E os sprites são alinhados com a TELA (direção da câmera invertida), não apontados pro ponto da câmera, pra planta na beirada do campo de visão não aparecer torta.
+- **Altura de planta vem do TIPO, não do anel de distribuição**: a primeira versão passava a faixa de altura por anel, e o arbusto saiu com 11,5 x 9,2 unidades — quase metade da largura da pista. Cada tipo tem a sua faixa agora (`PLANT_HEIGHT`).
+- **Tema e direção de arte são coisas diferentes**: faixas no chão, sprites, placas e paleta valem nos dois temas — não são "coisa de retrô", são o que faz parecer arcade de corrida. Só fidelidade gráfica (resolução, sombra, banding do céu) entra no tema. Separar os dois em `VISUAL` e `ART` evitou que o modo Moderno virasse "o jogo feio de antes de volta".
+
+### HUD e turbo
+- **Corte seco de velocidade parece bug**: quando o turbo acaba, voltar de 50 pra 38 num frame dá a sensação de bater numa parede invisível. A velocidade DESCE até o teto normal (ver `stepCar`), em vez de ser clampada de uma vez.
+- **Auto-repeat de teclado queima as cargas todas**: segurar o espaço manda `keydown` sem parar, e como cada carga dura pouco, as três iam embora em sequência sem o jogador perceber. O turbo só dispara na DESCIDA da tecla; no mobile o botão já é um pulso.
+- **Dois painéis ancorados no mesmo canto se escondem**: o medidor de combustível nasceu centralizado na direita e ficou invisível atrás do leaderboard, que desce quase até a metade da tela com 10 carros. Vale conferir sobreposição por código (`getBoundingClientRect`) em vez de confiar no olho, porque depende de quantos carros a corrida tem.
+- **Marcha é cosmética de propósito**: a física não tem caixa de câmbio, a marcha é só uma leitura da velocidade (`gearForSpeed`). É o suficiente pra dar a sensação certa no painel, e não muda como o carro dirige.
+- **Combustível é local, e isso só vale enquanto ele não faz nada**: como o tanque vazio não tem penalidade, não compensa sincronizar. No dia que penalizar, PRECISA virar estado do servidor — senão cada client castiga o seu carro num momento diferente, que é a mesma classe de bug do contador de voltas que já foi corrigida.
 
 ### Performance
 - **O maior gargalo era draw call, não polígono**: cada árvore/montanha/nuvem era um `Group` com meshes e materiais próprios — ~300 árvores × 3 peças, 92 montanhas e ~180 esferas de nuvem davam mais de 1.200 draw calls e ~700 materiais distintos por frame. Trocando por `InstancedMesh` (com cor por instância via `setColorAt` onde ela varia), o mapa estádio foi pra **28 draw calls e 19 materiais**, com 1.259 objetos dentro de 9 instâncias.
