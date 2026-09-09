@@ -1,22 +1,34 @@
 import { Room, Client } from "colyseus";
 import { RaceState } from "./RaceState";
 import { CarState } from "./CarState";
-import { buildTrackPath, TrackPath } from "../trackPath";
+import { buildTrackPath } from "../shared/trackGeometry";
+import type { TrackPath } from "../shared/trackGeometry";
+import { stepCar, normalizeAngle, MAX_SPEED } from "../shared/physics";
+import {
+  TOTAL_LAPS,
+  WAYPOINT_RADIUS,
+  BOT_WAYPOINT_RADIUS,
+  MIN_RACERS,
+  MAX_RACERS,
+  COUNTDOWN_SECONDS,
+} from "../shared/rules";
 
 interface RoomOptions {
-  name?: string;
-  color?: number;
-  mapId?: string;
+  name?: unknown;
+  color?: unknown;
+  mapId?: unknown;
 }
 
+// tudo aqui vem da rede, ou seja, de fora — nada é confiável antes de passar por clampFinite/
+// sanitizeName, então os campos são `unknown` de propósito
 interface InputMessage {
-  throttle: number;
-  brake: number;
-  steer: number;
+  throttle?: unknown;
+  brake?: unknown;
+  steer?: unknown;
 }
 
 interface KickMessage {
-  id: string;
+  id?: unknown;
 }
 
 interface BotAI {
@@ -31,32 +43,28 @@ interface CarProgress {
   nextIndex: number;
 }
 
-// PRECISA bater com as constantes de src/car.ts (CarController) no client, senão a predição do
-// client diverge do que o servidor calcula.
-const MAX_SPEED = 38;
-const MAX_REVERSE_SPEED = -12;
-const ACCELERATION = 18;
-const BRAKE_DECELERATION = 26;
-const FRICTION = 6;
-const TURN_SPEED = 2.2;
-
-const MIN_RACERS = 5;
-const MAX_RACERS = 10;
-const COUNTDOWN_SECONDS = 4;
-// PRECISA bater com TOTAL_LAPS em src/main.ts
-const TOTAL_LAPS = 3;
-// mesmo limiar de "chegou perto o bastante do waypoint" usado em src/raceTimer.ts (RaceProgress)
-const WAYPOINT_RADIUS = 14;
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
+/**
+ * Clamp pra valores que vieram da REDE. `Math.max`/`Math.min` propagam NaN em vez de barrar, então
+ * o clamp normal deixava passar `steer = NaN` (de um pacote malformado ou de um client adulterado)
+ * -> `heading` NaN -> `x`/`z` NaN, e aquele carro sumia da pista pelo resto da corrida, sem volta.
+ */
+function clampFinite(value: unknown, min: number, max: number, fallback = 0): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
 }
 
-function normalizeAngle(angle: number): number {
-  let a = angle % (Math.PI * 2);
-  if (a > Math.PI) a -= Math.PI * 2;
-  if (a < -Math.PI) a += Math.PI * 2;
-  return a;
+/** Nome também vem do client: tira caracteres de controle, corta em 10 e garante que sobra algo. */
+function sanitizeName(raw: unknown): string {
+  const text = typeof raw === "string" ? raw : "";
+  // filtra caractere de controle por codigo em vez de regex com escape, pra nao ter byte
+  // literal esquisito no fonte
+  const clean = Array.from(text)
+    .filter((ch) => ch.charCodeAt(0) >= 32 && ch.charCodeAt(0) !== 127)
+    .join("")
+    .trim()
+    .slice(0, 10);
+  return clean || "JOGADOR";
 }
 
 export class RaceRoom extends Room<RaceState> {
@@ -74,7 +82,8 @@ export class RaceRoom extends Room<RaceState> {
     this.patchRate = 1000 / 30;
 
     const state = new RaceState();
-    state.mapId = options?.mapId ?? "estadio";
+    // mapId vira índice de MAP_SHAPES lá no buildTrackPath — só aceita os ids que existem mesmo
+    state.mapId = typeof options?.mapId === "string" ? options.mapId : "estadio";
     this.setState(state);
     this.trackPath = buildTrackPath(state.mapId);
 
@@ -82,9 +91,9 @@ export class RaceRoom extends Room<RaceState> {
       if (this.state.phase !== "racing") return;
       const car = this.state.cars.get(client.sessionId);
       if (!car || car.isBot) return;
-      car.throttle = clamp(message.throttle, 0, 1);
-      car.brake = clamp(message.brake, 0, 1);
-      car.steer = clamp(message.steer, -1, 1);
+      car.throttle = clampFinite(message?.throttle, 0, 1);
+      car.brake = clampFinite(message?.brake, 0, 1);
+      car.steer = clampFinite(message?.steer, -1, 1);
     });
 
     this.onMessage("addBot", (client) => {
@@ -98,7 +107,7 @@ export class RaceRoom extends Room<RaceState> {
       if (client.sessionId !== this.state.hostSessionId) return;
       if (this.state.phase !== "waiting") return;
       const id = message?.id;
-      if (!id || id === client.sessionId) return;
+      if (typeof id !== "string" || !id || id === client.sessionId) return;
       const car = this.state.cars.get(id);
       if (!car) return;
 
@@ -141,8 +150,8 @@ export class RaceRoom extends Room<RaceState> {
     }
 
     const car = new CarState();
-    car.name = (options?.name ?? "JOGADOR").slice(0, 10);
-    car.color = options?.color ?? 0xe8e8e8;
+    car.name = sanitizeName(options?.name);
+    car.color = Math.floor(clampFinite(options?.color, 0, 0xffffff, 0xe8e8e8));
     this.spawnCar(client.sessionId, car, this.state.cars.size);
     this.state.cars.set(client.sessionId, car);
     console.log(`${car.name} entrou na sala ${this.roomId}`);
@@ -178,11 +187,13 @@ export class RaceRoom extends Room<RaceState> {
    * adicionar bot, e ao reiniciar a corrida (reaproveitando a mesma sala). */
   private spawnCar(id: string, car: CarState, slot: number) {
     const spawn = this.trackPath.gridPosition(slot);
+    car.gridSlot = slot;
     car.x = spawn.x;
     car.z = spawn.z;
     car.heading = this.trackPath.startHeading;
     car.speed = 0;
     car.lapCount = 0;
+    car.progress = 0;
     car.throttle = 0;
     car.brake = 0;
     car.steer = 0;
@@ -222,33 +233,12 @@ export class RaceRoom extends Room<RaceState> {
     this.state.cars.forEach((car, id) => {
       const ai = car.isBot ? this.botAI.get(id) : undefined;
       if (ai) this.driveBot(car, ai, dt);
-      this.applyPhysics(car, dt);
+      // MESMA função de física que o client roda no modo solo (shared/physics.ts) — o CarState já
+      // tem x/z/heading/speed e throttle/brake/steer com os nomes que ela espera
+      stepCar(car, car, dt);
       if (ai && car.speed > ai.topSpeed) car.speed = ai.topSpeed;
       this.updateProgress(id, car);
     });
-  }
-
-  private applyPhysics(car: CarState, dt: number) {
-    if (car.throttle > 0) {
-      car.speed += ACCELERATION * car.throttle * dt;
-    } else if (car.brake > 0) {
-      car.speed -= BRAKE_DECELERATION * dt;
-    } else {
-      const decel = FRICTION * dt;
-      if (car.speed > 0) car.speed = Math.max(0, car.speed - decel);
-      else if (car.speed < 0) car.speed = Math.min(0, car.speed + decel);
-    }
-
-    car.speed = clamp(car.speed, MAX_REVERSE_SPEED, MAX_SPEED);
-
-    if (Math.abs(car.speed) > 0.1) {
-      const speedFactor = car.speed / MAX_SPEED;
-      const direction = car.speed >= 0 ? 1 : -1;
-      car.heading -= car.steer * TURN_SPEED * dt * direction * Math.min(1, Math.abs(speedFactor) + 0.3);
-    }
-
-    car.x += Math.sin(car.heading) * car.speed * dt;
-    car.z += Math.cos(car.heading) * car.speed * dt;
   }
 
   /**
@@ -269,13 +259,18 @@ export class RaceRoom extends Room<RaceState> {
     if (Math.hypot(dx, dz) >= WAYPOINT_RADIUS) return;
 
     progress.nextIndex = (progress.nextIndex + 1) % waypoints.length;
-    if (progress.nextIndex !== this.trackPath.startIndex) return;
 
-    car.lapCount++;
-    if (car.lapCount >= TOTAL_LAPS) {
-      this.state.winnerId = id;
-      this.state.phase = "finished";
+    if (progress.nextIndex === this.trackPath.startIndex) {
+      car.lapCount++;
+      if (car.lapCount >= TOTAL_LAPS) {
+        this.state.winnerId = id;
+        this.state.phase = "finished";
+      }
     }
+
+    car.progress =
+      car.lapCount * waypoints.length +
+      ((progress.nextIndex - this.trackPath.startIndex + waypoints.length) % waypoints.length);
   }
 
   /** IA simplificada: persegue os waypoints da pista, com uma ré rápida quando fica travado. */
@@ -284,13 +279,13 @@ export class RaceRoom extends Room<RaceState> {
     const target = waypoints[ai.targetIndex];
     const dx = target.x - car.x;
     const dz = target.z - car.z;
-    if (Math.hypot(dx, dz) < 8) {
+    if (Math.hypot(dx, dz) < BOT_WAYPOINT_RADIUS) {
       ai.targetIndex = (ai.targetIndex + 1) % waypoints.length;
     }
 
     const desiredHeading = Math.atan2(dx, dz);
     const angleDiff = normalizeAngle(desiredHeading - car.heading);
-    const steer = clamp(-angleDiff * 2, -1, 1);
+    const steer = Math.max(-1, Math.min(1, -angleDiff * 2));
     const sharpTurn = Math.abs(angleDiff) > 0.5;
 
     if (ai.reverseTimer > 0) {

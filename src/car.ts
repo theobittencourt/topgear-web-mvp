@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import { elevationAt } from "./track";
+import { stepCar, normalizeAngle, MAX_SPEED } from "@shared/physics";
+import { BOT_WAYPOINT_RADIUS } from "@shared/rules";
 
 export function createCarMesh(bodyColor: number = 0xe8e8e8): THREE.Group {
   const group = new THREE.Group();
@@ -118,14 +120,12 @@ export class CarController {
   /** velocidade lateral de empurrão (bump), independente da velocidade de condução */
   bumpVelocity = new THREE.Vector2(0, 0);
 
-  readonly maxSpeed = 38;
-  readonly maxReverseSpeed = -12;
-  readonly acceleration = 18;
-  readonly brakeDeceleration = 26;
-  readonly friction = 6;
-  readonly turnSpeed = 2.2;
+  readonly maxSpeed = MAX_SPEED;
 
   protected waypoints?: THREE.Vector3[];
+
+  /** objeto reaproveitado pra não alocar um por carro por frame só pra chamar o `stepCar` */
+  private kinematics = { x: 0, z: 0, heading: 0, speed: 0 };
 
   constructor(mesh: THREE.Group, waypoints?: THREE.Vector3[]) {
     this.mesh = mesh;
@@ -133,26 +133,22 @@ export class CarController {
   }
 
   update(dt: number, input: { throttle: number; brake: number; steer: number }) {
-    if (input.throttle > 0) {
-      this.speed += this.acceleration * input.throttle * dt;
-    } else if (input.brake > 0) {
-      this.speed -= this.brakeDeceleration * dt;
-    } else {
-      const decel = this.friction * dt;
-      if (this.speed > 0) this.speed = Math.max(0, this.speed - decel);
-      else if (this.speed < 0) this.speed = Math.min(0, this.speed + decel);
-    }
+    // a física em si é a MESMA que o servidor roda no multiplayer (@shared/physics) — se as duas
+    // divergissem, treinar no solo não ensinaria nada sobre como o carro se comporta online
+    const k = this.kinematics;
+    k.x = this.mesh.position.x;
+    k.z = this.mesh.position.z;
+    k.heading = this.heading;
+    k.speed = this.speed;
 
-    this.speed = THREE.MathUtils.clamp(this.speed, this.maxReverseSpeed, this.maxSpeed);
+    stepCar(k, input, dt);
 
-    if (Math.abs(this.speed) > 0.1) {
-      const speedFactor = this.speed / this.maxSpeed;
-      const direction = this.speed >= 0 ? 1 : -1;
-      this.heading -= input.steer * this.turnSpeed * dt * direction * Math.min(1, Math.abs(speedFactor) + 0.3);
-    }
-
-    this.mesh.position.x += Math.sin(this.heading) * this.speed * dt + this.bumpVelocity.x * dt;
-    this.mesh.position.z += Math.cos(this.heading) * this.speed * dt + this.bumpVelocity.y * dt;
+    this.heading = k.heading;
+    this.speed = k.speed;
+    // o empurrão de colisão é local do client (o servidor ainda não simula colisão), então entra
+    // por fora do passo de física compartilhado
+    this.mesh.position.x = k.x + this.bumpVelocity.x * dt;
+    this.mesh.position.z = k.z + this.bumpVelocity.y * dt;
 
     // a fórmula de elevação varia devagar (poucas subidas/descidas por volta), então calcular
     // direto na posição do carro já é preciso — sem tabela de busca por waypoint (que tinha bugs
@@ -164,13 +160,6 @@ export class CarController {
     const decayFactor = Math.pow(0.02, dt);
     this.bumpVelocity.multiplyScalar(decayFactor);
   }
-}
-
-function normalizeAngle(angle: number): number {
-  let a = angle % (Math.PI * 2);
-  if (a > Math.PI) a -= Math.PI * 2;
-  if (a < -Math.PI) a += Math.PI * 2;
-  return a;
 }
 
 export class AICarController extends CarController {
@@ -194,7 +183,7 @@ export class AICarController extends CarController {
     const dz = target.z - this.mesh.position.z;
     const distance = Math.hypot(dx, dz);
 
-    if (distance < 8) {
+    if (distance < BOT_WAYPOINT_RADIUS) {
       this.targetIndex = (this.targetIndex + 1) % this.waypoints!.length;
     }
 

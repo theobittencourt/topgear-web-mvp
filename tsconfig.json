@@ -14,11 +14,16 @@
     "moduleDetection": "force",
     "noEmit": true,
 
+    /* Código compartilhado com o servidor (mesmo alias configurado no vite.config.ts) */
+    "paths": {
+      "@shared/*": ["./server/src/shared/*"]
+    },
+
     /* Linting */
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src", "server/src/shared"]
 }

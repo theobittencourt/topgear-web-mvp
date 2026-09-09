@@ -11,6 +11,15 @@ export class CarState extends Schema {
   @type("number") speed: number = 0;
 
   @type("number") lapCount: number = 0;
+  /**
+   * Score de ranking, monotônico ao longo da corrida: `voltas * nWaypoints + waypoints já passados`.
+   * Sincronizado porque o CLIENT não deve recontar progresso por conta própria — ele fazia isso em
+   * cima da posição já suavizada pelo lerp de render, então o leaderboard/HUD de cada jogador podia
+   * discordar do que o servidor tinha de fato contado.
+   */
+  @type("number") progress: number = 0;
+  /** Vaga na grid de largada, decidida pelo servidor — o client só posiciona o mesh onde mandaram. */
+  @type("number") gridSlot: number = 0;
 
   // input atual do jogador (o servidor simula a física, o client só manda intenção)
   throttle: number = 0;

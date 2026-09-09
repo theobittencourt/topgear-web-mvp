@@ -1,9 +1,11 @@
 import * as THREE from "three";
 import { createTrack, elevationAt, ROAD_WIDTH, findNearestWaypoint, TRACK_PRESETS } from "./track";
 import type { TrackConfig } from "./track";
+import { MAX_SPEED } from "@shared/physics";
+import { TOTAL_LAPS, MIN_RACERS, MAX_RACERS } from "@shared/rules";
 import { createCarMesh, CarController, AICarController } from "./car";
 import { resolveCarCollisions } from "./collision";
-import { RaceProgress, formatTime } from "./raceTimer";
+import { RaceProgress, LapClock, formatTime } from "./raceTimer";
 import { createLobby, joinLobby, getStateCallbacks } from "./network";
 import type { Room } from "colyseus.js";
 import {
@@ -25,8 +27,6 @@ import {
   createMobileControls,
   createPositionBadge,
 } from "./ui";
-
-const TOTAL_LAPS = 3;
 
 const app = document.getElementById("app")!;
 
@@ -112,7 +112,9 @@ interface Racer {
  * e a função de posicionamento em grid na largada. Retorna só o que os dois modos precisam.
  */
 function initTrackScene(config: TrackConfig) {
-  scene.add(new THREE.AmbientLight(0xffffff, config.night ? 0.15 : 0.6));
+  // à noite tem menos PointLight que antes (ver NIGHT_LAMP_LIGHT_EVERY em track.ts), então a luz
+  // ambiente sobe um pouco pra pista não virar um breu entre um poste e outro
+  scene.add(new THREE.AmbientLight(0xffffff, config.night ? 0.22 : 0.6));
   const sun = new THREE.DirectionalLight(0xffffff, config.night ? 0.08 : 0.9);
   sun.position.set(60, 100, 40);
   sun.castShadow = true;
@@ -128,45 +130,11 @@ function initTrackScene(config: TrackConfig) {
   scene.background = new THREE.Color(config.night ? 0x0a0e1f : 0x87ceeb);
   scene.fog = new THREE.Fog(config.night ? 0x0a0e1f : 0x87ceeb, config.night ? 60 : 100, config.night ? 220 : 380);
 
-  const { startPosition, waypoints } = createTrack(scene, config);
+  // waypoints, índice/direção de largada e vagas da grid saem todos de `@shared/trackGeometry`,
+  // via createTrack — é a MESMA fonte que o servidor usa no multiplayer
+  const { waypoints, startIndex, startHeading, gridPosition } = createTrack(scene, config);
 
-  function closestWaypointIndex(position: THREE.Vector3): number {
-    let best = 0;
-    let bestDist = Infinity;
-    waypoints.forEach((p, i) => {
-      const d = p.distanceTo(position);
-      if (d < bestDist) {
-        bestDist = d;
-        best = i;
-      }
-    });
-    return best;
-  }
-
-  function headingTowards(from: THREE.Vector3, to: THREE.Vector3): number {
-    return Math.atan2(to.x - from.x, to.z - from.z);
-  }
-
-  const startIdx = closestWaypointIndex(startPosition);
-  const startHeading = headingTowards(startPosition, waypoints[(startIdx + 1) % waypoints.length]);
-  // vetor lateral (perpendicular ao sentido da pista) pra alinhar os carros lado a lado na largada
-  const lateral = new THREE.Vector3(Math.cos(startHeading), 0, -Math.sin(startHeading));
-  const forward = new THREE.Vector3(Math.sin(startHeading), 0, Math.cos(startHeading));
-
-  // grid em duas colunas x várias fileiras (não cabem 10 carros lado a lado numa pista só)
-  const GRID_COLS = [-6, 6];
-  const GRID_ROW_SPACING = 7;
-
-  function gridPosition(slot: number): THREE.Vector3 {
-    const col = GRID_COLS[slot % GRID_COLS.length];
-    const row = Math.floor(slot / GRID_COLS.length);
-    return startPosition
-      .clone()
-      .add(lateral.clone().multiplyScalar(col))
-      .add(forward.clone().multiplyScalar(-row * GRID_ROW_SPACING));
-  }
-
-  return { waypoints, startIdx, startHeading, gridPosition };
+  return { waypoints, startIdx: startIndex, startHeading, gridPosition };
 }
 
 /** Modo solo: física 100% local, contra bots. */
@@ -259,9 +227,12 @@ function startGame(config: TrackConfig, carColor: number, playerName: string) {
     const dt = Math.min(clock.getDelta(), 0.05);
 
     if (raceStarted && !raceOver) {
+      // A/D estavam TROCADOS: a fisica faz `heading -= steer`, ou seja steer POSITIVO gira pro
+      // lado da direita — entao o A (esquerda) mandando +1 virava pra direita. O controle mobile
+      // ja seguia a convencao certa (arrastar pra direita = steer positivo), so o teclado nao.
       let steer = 0;
-      if (keys.a) steer += 1;
-      if (keys.d) steer -= 1;
+      if (keys.a) steer -= 1;
+      if (keys.d) steer += 1;
       if (mobileInput.steer !== 0) steer = mobileInput.steer;
 
       car.update(dt, {
@@ -384,13 +355,17 @@ function lerpAngle(from: number, to: number, t: number): number {
  * reconstruir a pista do zero a cada corrida).
  */
 function startMultiplayerGame(config: TrackConfig, room: Room) {
-  const { waypoints, startIdx, startHeading, gridPosition } = initTrackScene(config);
+  const { waypoints, startHeading, gridPosition } = initTrackScene(config);
 
   const $ = getStateCallbacks(room);
 
   interface RemoteCar {
     mesh: THREE.Group;
-    progress: RaceProgress;
+    /** só o tempo de volta é local — quando a volta VIRA é decisão do servidor */
+    lapClock: LapClock;
+    /** espelhos dos campos autoritativos do servidor (CarState.lapCount / CarState.progress) */
+    lapCount: number;
+    score: number;
     label: string;
     color: number;
     isPlayer: boolean;
@@ -399,7 +374,15 @@ function startMultiplayerGame(config: TrackConfig, room: Room) {
   const cars = new Map<string, RemoteCar>();
   let localCar: RemoteCar | null = null;
 
-  const speedHud = createSpeedHud(38 * 6); // 38 = MAX_SPEED do servidor, ver server/src/rooms/RaceRoom.ts
+  // último input já enviado, pra não repetir pacote idêntico a cada frame (ver o send lá embaixo)
+  const sentInput = { throttle: -1, brake: -1, steer: -1 };
+  function invalidateSentInput() {
+    sentInput.throttle = -1;
+    sentInput.brake = -1;
+    sentInput.steer = -1;
+  }
+
+  const speedHud = createSpeedHud(MAX_SPEED * 6);
   const lapHud = createLapHud();
   const leaderboardHud = createLeaderboardHud(isMobileDevice);
   const minimap = createMinimap(waypoints);
@@ -430,8 +413,8 @@ function startMultiplayerGame(config: TrackConfig, room: Room) {
       players,
       isHost: isHost(),
       localId: room.sessionId,
-      minRacers: 5,
-      maxRacers: 10,
+      minRacers: MIN_RACERS,
+      maxRacers: MAX_RACERS,
       onAddBot: () => room.send("addBot"),
       onStart: () => room.send("start"),
       onKick: (id: string) => room.send("kick", { id }),
@@ -446,9 +429,11 @@ function startMultiplayerGame(config: TrackConfig, room: Room) {
 
     if (phase === "waiting") {
       if (previousPhase !== "waiting") {
-        // corrida nova na mesma sala — zera o progresso local de todo mundo
+        // corrida nova na mesma sala — zera o que é local (o resto vem do servidor de novo)
         cars.forEach((r) => {
-          r.progress = new RaceProgress(waypoints, startIdx, startIdx);
+          r.lapClock.reset();
+          r.lapCount = 0;
+          r.score = 0;
         });
         victoryOverlay.hide();
       }
@@ -482,13 +467,17 @@ function startMultiplayerGame(config: TrackConfig, room: Room) {
   $(room.state).cars.onAdd((carState: any, sessionId: string) => {
     const isPlayer = sessionId === room.sessionId;
     const mesh = createCarMesh(carState.color);
-    mesh.position.copy(isPlayer ? gridPosition(0) : gridPosition(cars.size + 1));
+    // a vaga na grid é decidida pelo servidor. Antes o client chutava (0 pra si mesmo, cars.size+1
+    // pros outros), o que dava vagas trocadas em relação ao servidor pra quem entrava depois.
+    mesh.position.copy(gridPosition(carState.gridSlot));
     mesh.rotation.y = startHeading;
     scene.add(mesh);
 
     const entry: RemoteCar = {
       mesh,
-      progress: new RaceProgress(waypoints, startIdx, startIdx),
+      lapClock: new LapClock(),
+      lapCount: 0,
+      score: 0,
       label: carState.name,
       color: carState.color,
       isPlayer,
@@ -533,24 +522,35 @@ function startMultiplayerGame(config: TrackConfig, room: Room) {
     }
     const racing = phase === "racing";
     if (racing && !wasRacing) {
-      cars.forEach((r) => r.progress.resetLapClock());
+      cars.forEach((r) => r.lapClock.reset());
+      // o servidor zera throttle/brake/steer no spawn, então o cache de "já mandei isso" tem que
+      // ser invalidado junto — senão um input que não mudou desde a corrida anterior nunca sairia
+      invalidateSentInput();
     }
     wasRacing = racing;
 
     if (racing && localCar) {
+      // A/D estavam TROCADOS: a fisica faz `heading -= steer`, ou seja steer POSITIVO gira pro
+      // lado da direita — entao o A (esquerda) mandando +1 virava pra direita. O controle mobile
+      // ja seguia a convencao certa (arrastar pra direita = steer positivo), so o teclado nao.
       let steer = 0;
-      if (keys.a) steer += 1;
-      if (keys.d) steer -= 1;
+      if (keys.a) steer -= 1;
+      if (keys.d) steer += 1;
       if (mobileInput.steer !== 0) steer = mobileInput.steer;
 
-      room.send("input", {
-        throttle: keys.w || mobileInput.throttle ? 1 : 0,
-        brake: keys.s || mobileInput.brake ? 1 : 0,
-        steer,
-      });
-    }
+      const throttle = keys.w || mobileInput.throttle ? 1 : 0;
+      const brake = keys.s || mobileInput.brake ? 1 : 0;
 
-    const localLapBefore = localCar?.progress.lapCount ?? 0;
+      // só manda quando o input MUDA. Antes saía um pacote por frame (60/s por jogador, ~600/s numa
+      // sala cheia) repetindo o mesmo valor à toa — o WebSocket é confiável e ordenado, então o
+      // servidor simplesmente segue com o último valor recebido até chegar um diferente.
+      if (throttle !== sentInput.throttle || brake !== sentInput.brake || steer !== sentInput.steer) {
+        sentInput.throttle = throttle;
+        sentInput.brake = brake;
+        sentInput.steer = steer;
+        room.send("input", { throttle, brake, steer });
+      }
+    }
     // o servidor manda posição a 30Hz (patchRate ajustado, ver RaceRoom.onCreate) mas a gente
     // renderiza a 60fps — copiar a posição direto faz o carro (e a câmera, que mira nele) "degrau"
     // a cada pacote novo. Suaviza em direção ao valor mais recente em vez de saltar pra ele —
@@ -563,40 +563,40 @@ function startMultiplayerGame(config: TrackConfig, room: Room) {
       entry.mesh.position.z = THREE.MathUtils.lerp(entry.mesh.position.z, carState.z, posT);
       entry.mesh.position.y = elevationAt(entry.mesh.position.x, entry.mesh.position.z);
       entry.mesh.rotation.y = lerpAngle(entry.mesh.rotation.y, carState.heading, posT);
-      if (racing) {
-        entry.progress.update(entry.mesh.position);
+
+      // volta e ranking chegam PRONTOS do servidor — o client não reconta nada, só espelha
+      if (carState.lapCount > entry.lapCount) {
+        entry.lapClock.completeLap();
+        if (entry.isPlayer && carState.lapCount < TOTAL_LAPS) {
+          lapBanner.show(`VOLTA ${carState.lapCount + 1} DE ${TOTAL_LAPS}`);
+        }
       }
+      entry.lapCount = carState.lapCount;
+      entry.score = carState.progress;
     });
-    if (
-      localCar &&
-      localCar.progress.lapCount > localLapBefore &&
-      localCar.progress.lapCount < TOTAL_LAPS
-    ) {
-      lapBanner.show(`VOLTA ${localCar.progress.lapCount + 1} DE ${TOTAL_LAPS}`);
-    }
 
     if (localCar) {
       const localState = room.state.cars.get(room.sessionId);
       speedHud.update(
         localState ? Math.abs(localState.speed) * 6 : 0,
-        racing ? formatTime(localCar.progress.currentLapElapsed()) : "0'00\"00"
+        racing ? formatTime(localCar.lapClock.currentElapsed()) : "0'00\"00"
       );
       lapHud.update(
-        localCar.progress.lapCount,
+        localCar.lapCount,
         TOTAL_LAPS,
-        localCar.progress.lastLapTime,
-        localCar.progress.bestLapTime,
+        localCar.lapClock.lastLapTime,
+        localCar.lapClock.bestLapTime,
         formatTime
       );
       const carList = [...cars.values()];
-      const sorted = [...carList].sort((a, b) => b.progress.score() - a.progress.score());
+      const sorted = [...carList].sort((a, b) => b.score - a.score);
       leaderboardHud.update(
         carList.map((r) => ({
           label: r.label,
           color: r.color,
           isPlayer: r.isPlayer,
-          lapCount: r.progress.lapCount,
-          score: r.progress.score(),
+          lapCount: r.lapCount,
+          score: r.score,
         }))
       );
       positionBadge.update(sorted.indexOf(localCar) + 1);

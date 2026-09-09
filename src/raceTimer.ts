@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { WAYPOINT_RADIUS } from "@shared/rules";
 
 export class RaceProgress {
   private waypoints: THREE.Vector3[];
@@ -23,14 +24,13 @@ export class RaceProgress {
 
     const target = this.waypoints[this.nextIndex];
     // distância só no plano (x,z) — ignora a elevação (y), senão um carro levemente fora de
-    // sincronia com a altura da pista poderia nunca "alcançar" o waypoint. O limiar também
-    // precisa ser maior que a metade da largura da pista, senão um carro andando perto da borda
-    // (não no centro) pode nunca ficar perto o suficiente do waypoint do centro, travando a volta.
+    // sincronia com a altura da pista poderia nunca "alcançar" o waypoint. O porquê do valor do
+    // limiar está documentado junto com a constante, em @shared/rules.
     const dx = target.x - position.x;
     const dz = target.z - position.z;
     const distance = Math.hypot(dx, dz);
 
-    if (distance < 14) {
+    if (distance < WAYPOINT_RADIUS) {
       this.nextIndex = (this.nextIndex + 1) % this.waypoints.length;
 
       if (this.nextIndex === this.finishIndex) {
@@ -58,6 +58,40 @@ export class RaceProgress {
   score(): number {
     const progress = (this.nextIndex - this.finishIndex + this.waypoints.length) % this.waypoints.length;
     return this.lapCount * this.waypoints.length + progress;
+  }
+}
+
+/**
+ * Cronômetro de volta puro, SEM lógica de progresso. Usado no multiplayer, onde quem decide que
+ * uma volta terminou é o servidor (`car.lapCount`) — o client só marca o tempo quando aquele
+ * contador muda. Antes o client rodava um `RaceProgress` inteiro por cima da posição já suavizada
+ * pelo lerp de render, ou seja, duas contagens de volta independentes que podiam discordar na tela.
+ */
+export class LapClock {
+  private lapStartTime = performance.now();
+
+  lastLapTime: number | null = null;
+  bestLapTime: number | null = null;
+
+  reset() {
+    this.lapStartTime = performance.now();
+    this.lastLapTime = null;
+    this.bestLapTime = null;
+  }
+
+  /** Chame quando o servidor incrementar a volta desse carro. */
+  completeLap() {
+    const now = performance.now();
+    const lapTime = now - this.lapStartTime;
+    this.lapStartTime = now;
+    this.lastLapTime = lapTime;
+    if (this.bestLapTime === null || lapTime < this.bestLapTime) {
+      this.bestLapTime = lapTime;
+    }
+  }
+
+  currentElapsed(): number {
+    return performance.now() - this.lapStartTime;
   }
 }
 

@@ -311,8 +311,16 @@ export function createCountdownOverlay() {
   box.appendChild(text);
   document.body.appendChild(el);
 
+  let pendingStep: number | undefined;
+
   return {
     start(onDone: () => void) {
+      // o fim da sequência esconde o overlay com display:none — sem restaurar aqui, a segunda
+      // corrida numa mesma sala (o "reiniciar" do multiplayer, que NÃO recarrega a página)
+      // largava sem countdown nenhum aparecer na tela
+      el.style.display = "flex";
+      window.clearTimeout(pendingStep);
+
       const sequence = [
         { text: "3", bg: "#d4342c" },
         { text: "2", bg: "#d4342c" },
@@ -330,7 +338,7 @@ export function createCountdownOverlay() {
         text.textContent = sequence[i].text;
         box.style.background = sequence[i].bg;
         i++;
-        window.setTimeout(step, 1000);
+        pendingStep = window.setTimeout(step, 1000);
       }
 
       step();
