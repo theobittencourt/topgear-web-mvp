@@ -62,7 +62,7 @@ Controles: **W** acelera, **S** freia/ré, **A/D** viram, **espaço/shift** disp
 - [x] Fases sincronizadas (`waiting` → `countdown` → `racing` → `finished`), com reinício na mesma sala
 - [x] Suavização da posição no client pra esconder o degrau dos pacotes de rede
 
-### HUD
+### HUD e menus
 - [x] Velocímetro digital (km/h) com barra de tacômetro
 - [x] Marcha, cargas de turbo e medidor de combustível segmentado (verde/âmbar/vermelho, piscando na reserva)
 - [x] Leaderboard ao vivo, minimapa, badge de posição, volta atual, última volta e melhor volta
@@ -70,6 +70,10 @@ Controles: **W** acelera, **S** freia/ré, **A/D** viram, **espaço/shift** disp
 - [x] Tela inicial pra digitar o nickname (salvo no `localStorage`), seleção de modo, mapa e carro
 - [x] Escolha de tema visual (Retrô / Moderno) na tela inicial, salva entre sessões
 - [x] Controles mobile por toque, com zoom por pinça e double-tap bloqueados
+- [x] Logo do jogo nas telas de menu, favicon e card de compartilhamento (Open Graph)
+- [x] Paleta dos menus tirada da própria logo, com botões vermelho/grafite
+- [x] Som de clique nos botões de menu (mudo durante a corrida)
+- [x] Navegação pra trás em todas as telas do fluxo, com botão "Voltar" e atalho Esc
 
 ### Pendente
 - [ ] Tanque vazio não penaliza nada — o combustível hoje é só tensão. Se passar a penalizar, precisa virar estado do servidor
@@ -81,6 +85,7 @@ Controles: **W** acelera, **S** freia/ré, **A/D** viram, **espaço/shift** disp
 - [ ] Countdown do client é fixo em 4×1s e ignora o `state.countdown` que o servidor já sincroniza
 - [ ] Sem testes automatizados, sem lint, sem CI
 - [ ] `main.ts` tem dois loops de render quase idênticos (solo e online), com o bloco de HUD/câmera duplicado
+- [ ] A sala de espera não tem "Voltar" — sair dela exigiria `room.leave()` e desfazer a conexão, que é mais do que trocar de tela
 
 ## Arquivos principais
 
@@ -92,6 +97,7 @@ Controles: **W** acelera, **S** freia/ré, **A/D** viram, **espaço/shift** disp
 - `ui.ts` — HUD e todas as telas (DOM puro)
 - `retro.ts` — tema visual (`VISUAL`), direção de arte (`ART`) e a escala de resolução interna
 - `sprites.ts` — sprites 2D de beira de pista, desenhados em canvas e instanciados
+- `audio.ts` — som de interface (só o clique de menu por enquanto)
 - `main.ts` — monta a cena, o fluxo de telas e os dois loops de jogo
 - `network.ts` — conexão com o servidor Colyseus
 
@@ -157,6 +163,20 @@ Controles: **W** acelera, **S** freia/ré, **A/D** viram, **espaço/shift** disp
 - **Dois painéis ancorados no mesmo canto se escondem**: o medidor de combustível nasceu centralizado na direita e ficou invisível atrás do leaderboard, que desce quase até a metade da tela com 10 carros. Vale conferir sobreposição por código (`getBoundingClientRect`) em vez de confiar no olho, porque depende de quantos carros a corrida tem.
 - **Marcha é cosmética de propósito**: a física não tem caixa de câmbio, a marcha é só uma leitura da velocidade (`gearForSpeed`). É o suficiente pra dar a sensação certa no painel, e não muda como o carro dirige.
 - **Combustível é local, e isso só vale enquanto ele não faz nada**: como o tanque vazio não tem penalidade, não compensa sincronizar. No dia que penalizar, PRECISA virar estado do servidor — senão cada client castiga o seu carro num momento diferente, que é a mesma classe de bug do contador de voltas que já foi corrigida.
+
+### Identidade visual e menus
+- **Paleta tirada da arte, não escolhida no olho**: amostrando `assets/logo.png`, a logo é basicamente preto (34% dos pixels), vermelho `#f00010` (17%) e branco/prata (17%) — nenhum amarelo, verde ou azul, que era exatamente o que o menu usava. Dá pra fazer isso com um script de 10 linhas e acabar a discussão. A divisão dos botões espelha a própria logo, que escreve "TOP GEAR" em branco e "WEB" em vermelho: ação principal vermelha, alternativa em grafite, as duas com fundo escuro e texto branco (nenhuma perde legibilidade).
+- **O HUD de corrida NÃO segue essa paleta, de propósito**: o amarelo sobre a pista existe pra leitura rápida por cima de uma cena 3D em movimento, que é um problema diferente do de um menu em fundo chapado. Por isso `MENU` só é usado na região das telas de menu.
+- **`${}` só interpola dentro de crase**: trocando cores por interpolação em massa, várias caíram em strings de aspas comuns e viraram texto literal — o CSS ficou inválido e os botões assumiram o cinza padrão do navegador. Sintoma clássico: botão "sem estilo" em vez de erro. Vale um passe procurando `"${` depois de qualquer substituição desse tipo.
+- **Imagem pesada não se resolve redimensionando, e sim reduzindo a paleta**: a logo e o favicon chegaram com ~700 KB cada. Redimensionar levou pra 222 KB; reduzir pra 128 cores levou pra 22 KB, sem diferença visível. Pixel art tem pouquíssimas cores reais, então PNG indexado é quase de graça. `public/` inteiro vai pro deploy, então os originais ficam em `assets/`.
+- **Reduzir imagem quer filtro SUAVE, não `pixelated`**: a logo tem 900px e sempre aparece menor, ou seja o navegador só reduz. `image-rendering: pixelated` só ajuda quando a imagem é AMPLIADA; numa redução ele serrilha em vez de suavizar.
+
+### Som e navegação
+- **Som de clique + `location.reload()` na mesma ação não convivem**: os botões de tema só faziam barulho no segundo clique. O som dispara no `pointerdown`, o reload vinha logo depois e matava o áudio antes de sair qualquer coisa — e o segundo clique, no botão já ativo, caía num `return` antecipado que não recarregava, então aí o som saía inteiro. Resolvido adiando o reload em 180 ms: o suficiente pra ouvir o ataque do clique sem a troca parecer travada.
+- **Um listener delegado por tela, não um por botão**: as telas criam dezenas de botões e algumas os recriam (a lista de jogadores do lobby é redesenhada a cada mudança de estado do servidor). Um listener delegado na raiz da tela continua valendo pros botões novos sem precisar religar nada. E dispara no `pointerdown`, não no `click`: o som sai no aperto, que é o que dá sensação de resposta imediata.
+- **Voltar precisa DESTRUIR a tela, não só escondê-la**: seguir em frente sempre cria uma tela nova, então guardar as antigas empilharia telas mortas (e listeners) a cada ida e volta. Com `destroy()` a contagem de telas no DOM fica estável mesmo indo e voltando indefinidamente.
+- **Listener de teclado precisa morrer junto com a tela**: o Esc é registrado no `window` (uma `div` não recebe tecla sem foco), então sem remover no `destroy()` uma tela já destruída continuaria respondendo ao Esc.
+- **Falha de rede deixava tela preta**: quando criar/entrar em sala falhava, o jogador ficava olhando pro nada — a seleção já tinha se escondido sozinha ao ser clicada e o loading sumia no `catch`. Agora o `catch` devolve a tela anterior, dando pra corrigir e tentar de novo.
 
 ### Performance
 - **O maior gargalo era draw call, não polígono**: cada árvore/montanha/nuvem era um `Group` com meshes e materiais próprios — ~300 árvores × 3 peças, 92 montanhas e ~180 esferas de nuvem davam mais de 1.200 draw calls e ~700 materiais distintos por frame. Trocando por `InstancedMesh` (com cor por instância via `setColorAt` onde ela varia), o mapa estádio foi pra **28 draw calls e 19 materiais**, com 1.259 objetos dentro de 9 instâncias.

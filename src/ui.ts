@@ -1,4 +1,5 @@
 import { getTheme, setTheme } from "./retro";
+import { playMenuClick } from "./audio";
 import type { VisualTheme } from "./retro";
 
 export interface RacerDisplay {
@@ -10,6 +11,148 @@ export interface RacerDisplay {
 }
 
 const RETRO_FONT = `'Courier New', Courier, monospace`;
+
+/**
+ * Paleta das telas de MENU, tirada da própria logo.
+ *
+ * Amostrando `assets/logo.png`, ela é basicamente três cores: preto (34% dos pixels), vermelho
+ * #f00010 (17%) e branco/prata (17%). Não tem amarelo, verde nem azul em lugar nenhum — que era
+ * exatamente o que o menu usava, e por isso destoava da arte.
+ *
+ * A divisão vermelho/grafite nos botões espelha a própria logo, que escreve "TOP GEAR" em branco e
+ * "WEB" em vermelho: a ação principal fica vermelha, a alternativa fica grafite. As duas continuam
+ * com fundo escuro e texto branco, então nenhuma perde legibilidade.
+ *
+ * O HUD de corrida NÃO usa isto de propósito: lá o amarelo sobre a pista existe pra leitura rápida
+ * por cima de uma cena 3D em movimento, que é um problema diferente do de um menu em fundo chapado.
+ */
+const MENU = {
+  /** fundo das telas — o preto da logo é neutro, sem o roxo que o fundo antigo tinha */
+  fundo: "#0c0c14",
+  painel: "#16161f",
+  /** o vermelho da logo, levemente rebaixado pra não vibrar atrás de texto branco */
+  vermelho: "#d81420",
+  vermelhoHover: "#ef2230",
+  /** botão alternativo: grafite, o mesmo contraste vermelho-sobre-preto que a logo usa */
+  grafite: "#1c1c26",
+  grafiteHover: "#2a2a38",
+  branco: "#f0f0f0",
+  /** prata das letras de "TOP GEAR", pra texto secundário */
+  prata: "#d0d0e0",
+  apagado: "#7d7d8a",
+};
+
+/**
+ * Logo do jogo, usada nas telas de menu.
+ *
+ * O arquivo tem 900px de largura e a gente sempre mostra ela MENOR que isso, então o navegador só
+ * reduz — e redução quer filtro suave, que é o padrão. Nada de `image-rendering: pixelated` aqui:
+ * ele só ajuda quando a imagem é ampliada; numa redução ele serrilha em vez de suavizar.
+ *
+ * O `aspect-ratio` fixo evita o layout pular quando a imagem termina de carregar.
+ */
+/**
+ * Uma tela de menu, do ponto de vista de quem monta o fluxo.
+ *
+ * `destroy()` existe porque navegar pra trás precisa TIRAR a tela do DOM, não só escondê-la: se ela
+ * ficasse guardada, ir e voltar várias vezes empilharia telas mortas (e listeners) sem parar.
+ */
+export interface MenuScreen {
+  show(): void;
+  hide(): void;
+  destroy(): void;
+}
+
+/**
+ * Dá à tela o controle de mostrar/esconder e, quando ela tem "voltar", faz o Esc valer como o botão.
+ *
+ * O listener do Esc vai no `window` porque uma `div` não recebe tecla sem foco — e por isso o
+ * `destroy()` obrigatoriamente o remove, senão uma tela já destruída continuaria respondendo.
+ */
+function menuScreenHandle(el: HTMLElement, onBack?: () => void): MenuScreen {
+  let aoTeclar: ((e: KeyboardEvent) => void) | null = null;
+
+  if (onBack) {
+    aoTeclar = (e: KeyboardEvent) => {
+      // só a tela visível reage: várias telas do fluxo coexistem escondidas
+      if (e.key === "Escape" && el.style.display !== "none") onBack();
+    };
+    window.addEventListener("keydown", aoTeclar);
+  }
+
+  return {
+    show() {
+      el.style.display = "flex";
+    },
+    hide() {
+      el.style.display = "none";
+    },
+    destroy() {
+      if (aoTeclar) window.removeEventListener("keydown", aoTeclar);
+      el.remove();
+    },
+  };
+}
+
+/** Botão de voltar, discreto e no rodapé da tela. */
+function createBackButton(onBack: () => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  // sem glifo de seta de propósito: em algumas fontes de celular ◀/▲ viram um ícone quebrado — é o
+  // mesmo motivo dos triângulos dos controles mobile serem desenhados com borda CSS
+  button.textContent = "Voltar";
+  button.style.cssText = `
+    font-family: ${RETRO_FONT}; font-size: 13px; font-weight: 700; letter-spacing: 2px;
+    text-transform: uppercase; padding: 9px 24px; margin-top: 30px;
+    background: ${MENU.grafite}; color: ${MENU.apagado}; border: 3px solid ${MENU.apagado};
+    box-shadow: 3px 3px 0 #000; cursor: pointer;
+  `;
+  button.addEventListener("mouseenter", () => {
+    button.style.color = "#fff";
+    button.style.borderColor = "#fff";
+  });
+  button.addEventListener("mouseleave", () => {
+    button.style.color = MENU.apagado;
+    button.style.borderColor = MENU.apagado;
+  });
+  button.addEventListener("click", onBack);
+  return button;
+}
+
+/**
+ * Liga o som de clique nos botões de uma tela de MENU.
+ *
+ * O listener é delegado na raiz da tela em vez de um por botão, por dois motivos: as telas criam
+ * dezenas de botões, e algumas os recriam (a lista de jogadores do lobby é redesenhada a cada
+ * mudança de estado do servidor) — um listener delegado continua valendo pros botões novos sem
+ * precisar religar nada.
+ *
+ * Dispara no `pointerdown`, não no `click`: o som sai no aperto e não na soltura, que é o que dá a
+ * sensação de resposta imediata de menu de arcade.
+ *
+ * Só as telas de menu chamam isso. Durante a corrida o jogo é mudo.
+ */
+function comSomDeMenu<T extends HTMLElement>(el: T): T {
+  el.addEventListener("pointerdown", (evento) => {
+    const alvo = evento.target as HTMLElement | null;
+    if (alvo && alvo.closest("button")) playMenuClick();
+  });
+  return el;
+}
+
+function createLogo(maxWidthPx: number, marginBottomPx: number): HTMLImageElement {
+  const img = document.createElement("img");
+  img.src = "/logo.png";
+  img.alt = "Top Gear Web";
+  img.style.cssText = `
+    width: min(${maxWidthPx}px, 80vw);
+    height: auto;
+    aspect-ratio: 2 / 1;
+    display: block;
+    margin: 0 auto ${marginBottomPx}px;
+    user-select: none; -webkit-user-drag: none;
+  `;
+  return img;
+}
 
 function colorToCss(color: number): string {
   return `#${color.toString(16).padStart(6, "0")}`;
@@ -566,24 +709,17 @@ export interface MobileControlState {
 export function createLoadingScreen() {
   const el = document.createElement("div");
   el.style.cssText = `
-    position: fixed; inset: 0; background: #0b0b1a;
+    position: fixed; inset: 0; background: ${MENU.fundo};
     display: none; flex-direction: column; align-items: center; justify-content: center;
     z-index: 35; font-family: ${RETRO_FONT}; color: #fff; text-align: center; gap: 8px;
   `;
 
-  const checkerBar = document.createElement("div");
-  checkerBar.style.cssText = `
-    width: 340px; height: 20px; margin-bottom: 32px;
-    background-image: repeating-conic-gradient(#fff 0% 25%, #111 0% 50%);
-    background-size: 20px 20px;
-    border: 3px solid #fff;
-  `;
-  el.appendChild(checkerBar);
+  el.appendChild(createLogo(340, 20));
 
   const title = document.createElement("div");
   title.style.cssText = `
-    font-size: 30px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
-    color: #ffe14d; text-shadow: 3px 3px 0 #000; margin-bottom: 28px;
+    font-size: 22px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
+    color: ${MENU.branco}; text-shadow: 3px 3px 0 #000; margin-bottom: 24px;
   `;
   title.textContent = "Carregando...";
   el.appendChild(title);
@@ -591,12 +727,12 @@ export function createLoadingScreen() {
   // barrinha de progresso "falsa" (indeterminada), só animação, estilo carregamento de cartucho
   const barTrack = document.createElement("div");
   barTrack.style.cssText = `
-    width: 280px; height: 22px; border: 3px solid #fff; background: #14142b;
+    width: 280px; height: 22px; border: 3px solid #fff; background: ${MENU.painel};
     box-shadow: 4px 4px 0 #000; overflow: hidden; position: relative;
   `;
   const barFill = document.createElement("div");
   barFill.style.cssText = `
-    position: absolute; top: 0; bottom: 0; width: 40%; background: #d4342c;
+    position: absolute; top: 0; bottom: 0; width: 40%; background: ${MENU.vermelho};
     animation: loadingBarMove 1s linear infinite;
   `;
   const styleTag = document.createElement("style");
@@ -610,7 +746,7 @@ export function createLoadingScreen() {
   barTrack.appendChild(barFill);
   el.appendChild(barTrack);
 
-  document.body.appendChild(el);
+  document.body.appendChild(comSomDeMenu(el));
 
   return {
     show() {
@@ -626,27 +762,20 @@ export function createLoadingScreen() {
 }
 
 /** Tela pra escolher entre correr sozinho contra bots ou entrar numa sala online. */
-export function createModeSelectScreen(onSelect: (mode: "solo" | "online") => void) {
+export function createModeSelectScreen(onSelect: (mode: "solo" | "online") => void): MenuScreen {
   const el = document.createElement("div");
   el.style.cssText = `
-    position: fixed; inset: 0; background: #0b0b1a;
+    position: fixed; inset: 0; background: ${MENU.fundo};
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     z-index: 30; font-family: ${RETRO_FONT}; color: #fff; text-align: center; gap: 8px;
   `;
 
-  const checkerBar = document.createElement("div");
-  checkerBar.style.cssText = `
-    width: 340px; height: 20px; margin-bottom: 24px;
-    background-image: repeating-conic-gradient(#fff 0% 25%, #111 0% 50%);
-    background-size: 20px 20px;
-    border: 3px solid #fff;
-  `;
-  el.appendChild(checkerBar);
+  el.appendChild(createLogo(420, 8));
 
   const title = document.createElement("div");
   title.style.cssText = `
-    font-size: 34px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
-    color: #ffe14d; text-shadow: 3px 3px 0 #000; margin-bottom: 32px;
+    font-size: 22px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
+    color: ${MENU.branco}; text-shadow: 3px 3px 0 #000; margin-bottom: 28px;
   `;
   title.textContent = "Como Vai Correr?";
   el.appendChild(title);
@@ -656,8 +785,8 @@ export function createModeSelectScreen(onSelect: (mode: "solo" | "online") => vo
   el.appendChild(list);
 
   const options: { mode: "solo" | "online"; label: string; color: string; hover: string }[] = [
-    { mode: "solo", label: "Solo (contra bots)", color: "#1f8f3d", hover: "#279a49" },
-    { mode: "online", label: "Sala Online (amigos)", color: "#1f5fb8", hover: "#2a6fc9" },
+    { mode: "solo", label: "Solo (contra bots)", color: MENU.vermelho, hover: MENU.vermelhoHover },
+    { mode: "online", label: "Sala Online (amigos)", color: MENU.grafite, hover: MENU.grafiteHover },
   ];
 
   for (const opt of options) {
@@ -683,7 +812,11 @@ export function createModeSelectScreen(onSelect: (mode: "solo" | "online") => vo
   }
 
   el.appendChild(createThemePicker());
-  document.body.appendChild(el);
+  document.body.appendChild(comSomDeMenu(el));
+
+  // a tela inicial não tem "voltar": ela É o começo do fluxo. O handle existe pra que as telas
+  // seguintes consigam trazê-la de volta.
+  return menuScreenHandle(el);
 }
 
 /**
@@ -699,7 +832,7 @@ function createThemePicker(): HTMLElement {
 
   const label = document.createElement("div");
   label.style.cssText = `
-    font-size: 12px; letter-spacing: 2px; color: #8ecbff; text-transform: uppercase;
+    font-size: 12px; letter-spacing: 2px; color: ${MENU.prata}; text-transform: uppercase;
   `;
   label.textContent = "Visual";
   wrap.appendChild(label);
@@ -714,15 +847,15 @@ function createThemePicker(): HTMLElement {
   ];
 
   const dica = document.createElement("div");
-  dica.style.cssText = "font-size: 11px; letter-spacing: 1px; color: #7a7f99; height: 14px;";
+  dica.style.cssText = `font-size: 11px; letter-spacing: 1px; color: ${MENU.apagado}; height: 14px;`;
 
   const botoes: HTMLButtonElement[] = [];
   function pintar() {
     const atual = getTheme();
     opcoes.forEach((opt, i) => {
       const ativo = opt.theme === atual;
-      botoes[i].style.background = ativo ? "#ffe14d" : "#14142b";
-      botoes[i].style.color = ativo ? "#14142b" : "#8a8fa8";
+      botoes[i].style.background = ativo ? MENU.vermelho : MENU.grafite;
+      botoes[i].style.color = ativo ? "#fff" : MENU.apagado;
       if (ativo) dica.textContent = opt.dica;
     });
   }
@@ -738,7 +871,11 @@ function createThemePicker(): HTMLElement {
     button.addEventListener("click", () => {
       if (getTheme() === opt.theme) return;
       setTheme(opt.theme);
-      window.location.reload();
+      // O clique toca no pointerdown, mas o reload matava o áudio antes de sair qualquer som — era
+      // por isso que estes dois botões só faziam barulho na segunda vez (o segundo clique cai no
+      // `return` acima e não recarrega). Uma espera curta deixa o clique ser ouvido sem que a troca
+      // pareça travada.
+      window.setTimeout(() => window.location.reload(), 180);
     });
     botoes.push(button);
     row.appendChild(button);
@@ -750,10 +887,14 @@ function createThemePicker(): HTMLElement {
 }
 
 /** Depois de escolher "Sala Online": criar uma sala nova (vira host) ou entrar com um código. */
-export function createOnlineChoiceScreen(onCreate: () => void, onJoin: () => void) {
+export function createOnlineChoiceScreen(
+  onCreate: () => void,
+  onJoin: () => void,
+  onBack?: () => void
+): MenuScreen {
   const el = document.createElement("div");
   el.style.cssText = `
-    position: fixed; inset: 0; background: #0b0b1a;
+    position: fixed; inset: 0; background: ${MENU.fundo};
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     z-index: 30; font-family: ${RETRO_FONT}; color: #fff; text-align: center; gap: 8px;
   `;
@@ -761,7 +902,7 @@ export function createOnlineChoiceScreen(onCreate: () => void, onJoin: () => voi
   const title = document.createElement("div");
   title.style.cssText = `
     font-size: 30px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
-    color: #ffe14d; text-shadow: 3px 3px 0 #000; margin-bottom: 32px;
+    color: ${MENU.branco}; text-shadow: 3px 3px 0 #000; margin-bottom: 32px;
   `;
   title.textContent = "Sala Online";
   el.appendChild(title);
@@ -771,8 +912,8 @@ export function createOnlineChoiceScreen(onCreate: () => void, onJoin: () => voi
   el.appendChild(list);
 
   const options: { label: string; color: string; hover: string; onClick: () => void }[] = [
-    { label: "Criar Sala", color: "#1f8f3d", hover: "#279a49", onClick: onCreate },
-    { label: "Entrar com Código", color: "#1f5fb8", hover: "#2a6fc9", onClick: onJoin },
+    { label: "Criar Sala", color: MENU.vermelho, hover: MENU.vermelhoHover, onClick: onCreate },
+    { label: "Entrar com Código", color: MENU.grafite, hover: MENU.grafiteHover, onClick: onJoin },
   ];
 
   for (const opt of options) {
@@ -797,21 +938,26 @@ export function createOnlineChoiceScreen(onCreate: () => void, onJoin: () => voi
     list.appendChild(button);
   }
 
-  document.body.appendChild(el);
+  if (onBack) el.appendChild(createBackButton(onBack));
+  document.body.appendChild(comSomDeMenu(el));
+  return menuScreenHandle(el, onBack);
 }
 
 /** Campo pra digitar o código da sala de um amigo. */
-export function createCodeEntryScreen(onSubmit: (code: string) => void) {
+export function createCodeEntryScreen(
+  onSubmit: (code: string) => void,
+  onBack?: () => void
+): MenuScreen {
   const el = document.createElement("div");
   el.style.cssText = `
-    position: fixed; inset: 0; background: #0b0b1a;
+    position: fixed; inset: 0; background: ${MENU.fundo};
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     z-index: 30; font-family: ${RETRO_FONT}; color: #fff; text-align: center; gap: 8px;
   `;
 
   const title = document.createElement("div");
   title.style.cssText = `
-    font-size: 22px; letter-spacing: 2px; text-transform: uppercase; color: #ffe14d;
+    font-size: 22px; letter-spacing: 2px; text-transform: uppercase; color: ${MENU.branco};
     margin-bottom: 20px;
   `;
   title.textContent = "Código da Sala";
@@ -825,13 +971,19 @@ export function createCodeEntryScreen(onSubmit: (code: string) => void) {
   input.placeholder = "código";
   input.style.cssText = `
     font-family: ${RETRO_FONT}; font-size: 28px; font-weight: 700; letter-spacing: 4px;
-    text-align: center; color: #fff; background: #14142b;
+    text-align: center; color: #fff; background: ${MENU.painel};
     border: 4px solid #fff; box-shadow: 5px 5px 0 #000; padding: 10px 16px; width: 280px;
-    margin-bottom: 28px; caret-color: #ff3b3b;
+    margin-bottom: 28px; caret-color: ${MENU.vermelho};
   `;
   input.addEventListener("input", () => {
     input.value = input.value.trim();
   });
+
+  // mesmo motivo do campo de nome: o anel de foco padrão do navegador é dourado e destoa da paleta
+  input.style.outline = "none";
+  input.addEventListener("focus", () => (input.style.borderColor = MENU.vermelho));
+  input.addEventListener("blur", () => (input.style.borderColor = "#fff"));
+
   el.appendChild(input);
 
   const button = document.createElement("button");
@@ -839,14 +991,14 @@ export function createCodeEntryScreen(onSubmit: (code: string) => void) {
   button.style.cssText = `
     font-family: ${RETRO_FONT}; font-size: 24px; font-weight: 700; letter-spacing: 2px;
     text-transform: uppercase; padding: 14px 48px;
-    background: #1f5fb8; color: #fff; border: 3px solid #fff;
+    background: ${MENU.grafite}; color: #fff; border: 3px solid #fff;
     box-shadow: 4px 4px 0 #000; cursor: pointer;
   `;
   button.addEventListener("mouseenter", () => {
-    button.style.background = "#2a6fc9";
+    button.style.background = MENU.grafiteHover;
   });
   button.addEventListener("mouseleave", () => {
-    button.style.background = "#1f5fb8";
+    button.style.background = MENU.grafite;
   });
 
   function submit() {
@@ -862,9 +1014,11 @@ export function createCodeEntryScreen(onSubmit: (code: string) => void) {
   });
 
   el.appendChild(button);
-  document.body.appendChild(el);
+  if (onBack) el.appendChild(createBackButton(onBack));
+  document.body.appendChild(comSomDeMenu(el));
 
   window.setTimeout(() => input.focus(), 0);
+  return menuScreenHandle(el, onBack);
 }
 
 export interface LobbyPlayer {
@@ -890,7 +1044,7 @@ export interface LobbyUpdate {
 export function createLobbyScreen() {
   const el = document.createElement("div");
   el.style.cssText = `
-    position: fixed; inset: 0; background: #0b0b1a;
+    position: fixed; inset: 0; background: ${MENU.fundo};
     display: none; flex-direction: column; align-items: center; justify-content: center;
     z-index: 30; font-family: ${RETRO_FONT}; color: #fff; text-align: center; gap: 8px;
   `;
@@ -898,7 +1052,7 @@ export function createLobbyScreen() {
   const title = document.createElement("div");
   title.style.cssText = `
     font-size: 26px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
-    color: #ffe14d; text-shadow: 3px 3px 0 #000; margin-bottom: 18px;
+    color: ${MENU.branco}; text-shadow: 3px 3px 0 #000; margin-bottom: 18px;
   `;
   title.textContent = "Sala de Espera";
   el.appendChild(title);
@@ -911,7 +1065,7 @@ export function createLobbyScreen() {
   // case-sensitive (tem letras minúsculas), então precisa aparecer exatamente como é de verdade
   const codeLabel = document.createElement("div");
   codeLabel.style.cssText = retroPanelStyle(
-    "font-size: 26px; letter-spacing: 4px; color: #fff; background: #14142b; text-transform: none;"
+    `font-size: 26px; letter-spacing: 4px; color: #fff; background: ${MENU.painel}; text-transform: none;`
   );
   codeRow.appendChild(codeLabel);
 
@@ -919,7 +1073,7 @@ export function createLobbyScreen() {
   copyButton.textContent = "Copiar";
   copyButton.style.cssText = `
     font-family: ${RETRO_FONT}; font-size: 13px; font-weight: 700; letter-spacing: 1px;
-    text-transform: uppercase; padding: 8px 14px; background: #1f5fb8; color: #fff;
+    text-transform: uppercase; padding: 8px 14px; background: ${MENU.grafite}; color: #fff;
     border: 3px solid #fff; box-shadow: 3px 3px 0 #000; cursor: pointer;
   `;
   copyButton.addEventListener("click", () => {
@@ -955,12 +1109,12 @@ export function createLobbyScreen() {
 
   const listPanel = document.createElement("div");
   listPanel.style.cssText = retroPanelStyle(
-    "width: 300px; min-height: 140px; text-align: left; color: #fff; background: #14142b; display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px;"
+    `width: 300px; min-height: 140px; text-align: left; color: #fff; background: ${MENU.painel}; display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px;`
   );
   el.appendChild(listPanel);
 
   const statusText = document.createElement("div");
-  statusText.style.cssText = "font-size: 14px; letter-spacing: 1px; color: #8ecbff; margin-bottom: 18px;";
+  statusText.style.cssText = `font-size: 14px; letter-spacing: 1px; color: ${MENU.prata}; margin-bottom: 18px;`;
   el.appendChild(statusText);
 
   const controls = document.createElement("div");
@@ -971,7 +1125,7 @@ export function createLobbyScreen() {
   addBotButton.textContent = "+ Adicionar Bot";
   addBotButton.style.cssText = `
     font-family: ${RETRO_FONT}; font-size: 16px; font-weight: 700; letter-spacing: 1px;
-    text-transform: uppercase; padding: 12px 20px; background: #6b4a2f; color: #fff;
+    text-transform: uppercase; padding: 12px 20px; background: ${MENU.grafite}; color: #fff;
     border: 3px solid #fff; box-shadow: 4px 4px 0 #000; cursor: pointer;
   `;
   controls.appendChild(addBotButton);
@@ -980,7 +1134,7 @@ export function createLobbyScreen() {
   startButton.textContent = "Iniciar Corrida";
   startButton.style.cssText = `
     font-family: ${RETRO_FONT}; font-size: 16px; font-weight: 700; letter-spacing: 1px;
-    text-transform: uppercase; padding: 12px 20px; background: #1f8f3d; color: #fff;
+    text-transform: uppercase; padding: 12px 20px; background: ${MENU.vermelho}; color: #fff;
     border: 3px solid #fff; box-shadow: 4px 4px 0 #000; cursor: pointer;
   `;
   controls.appendChild(startButton);
@@ -996,7 +1150,7 @@ export function createLobbyScreen() {
   addBotButton.addEventListener("click", () => onAddBot?.());
   startButton.addEventListener("click", () => onStart?.());
 
-  document.body.appendChild(el);
+  document.body.appendChild(comSomDeMenu(el));
 
   return {
     show() {
@@ -1028,7 +1182,7 @@ export function createLobbyScreen() {
           kickButton.title = "Remover";
           kickButton.style.cssText = `
             font-family: ${RETRO_FONT}; font-size: 14px; font-weight: 700; line-height: 1;
-            padding: 3px 9px; background: #d4342c; color: #fff; border: 2px solid #fff;
+            padding: 3px 9px; background: ${MENU.vermelho}; color: #fff; border: 2px solid #fff;
             cursor: pointer; flex-shrink: 0;
           `;
           kickButton.addEventListener("click", () => opts.onKick(p.id));
@@ -1052,46 +1206,25 @@ export function createLobbyScreen() {
   };
 }
 
-export function createNameEntryScreen(onStart: (name: string) => void) {
+export function createNameEntryScreen(
+  onStart: (name: string) => void,
+  onBack?: () => void
+): MenuScreen {
   const savedName = localStorage.getItem(PLAYER_NAME_STORAGE_KEY) ?? "";
 
   const el = document.createElement("div");
   el.style.cssText = `
-    position: fixed; inset: 0; background: #0b0b1a;
+    position: fixed; inset: 0; background: ${MENU.fundo};
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     z-index: 30; font-family: ${RETRO_FONT}; color: #fff; text-align: center; gap: 8px;
   `;
 
-  // faixa quadriculada, tipo largada
-  const checkerBar = document.createElement("div");
-  checkerBar.style.cssText = `
-    width: 340px; height: 20px; margin-bottom: 24px;
-    background-image: repeating-conic-gradient(#fff 0% 25%, #111 0% 50%);
-    background-size: 20px 20px;
-    border: 3px solid #fff;
-  `;
-  el.appendChild(checkerBar);
-
-  const title = document.createElement("div");
-  title.style.cssText = `
-    font-size: 54px; font-weight: 700; letter-spacing: 4px; text-transform: uppercase;
-    color: #ff3b3b; text-shadow: 4px 4px 0 #000, 8px 8px 0 #ffe14d;
-    margin-bottom: 8px;
-  `;
-  title.textContent = "TOP GEAR";
-  el.appendChild(title);
-
-  const subtitle = document.createElement("div");
-  subtitle.style.cssText = `
-    font-size: 16px; letter-spacing: 2px; text-transform: uppercase; color: #8ecbff;
-    margin-bottom: 40px;
-  `;
-  subtitle.textContent = "TEST DRIVE";
-  el.appendChild(subtitle);
+  // a logo substitui o título que antes era desenhado em texto
+  el.appendChild(createLogo(420, 24));
 
   const label = document.createElement("div");
   label.style.cssText = `
-    font-size: 18px; letter-spacing: 2px; text-transform: uppercase; color: #ffe14d;
+    font-size: 18px; letter-spacing: 2px; text-transform: uppercase; color: ${MENU.branco};
     margin-bottom: 14px;
   `;
   label.textContent = "Digite seu nome";
@@ -1104,14 +1237,20 @@ export function createNameEntryScreen(onStart: (name: string) => void) {
   input.placeholder = DEFAULT_PLAYER_NAME;
   input.style.cssText = `
     font-family: ${RETRO_FONT}; font-size: 32px; font-weight: 700; letter-spacing: 6px;
-    text-transform: uppercase; text-align: center; color: #fff; background: #14142b;
+    text-transform: uppercase; text-align: center; color: #fff; background: ${MENU.painel};
     border: 4px solid #fff; box-shadow: 5px 5px 0 #000; padding: 10px 16px; width: 280px;
-    margin-bottom: 28px; caret-color: #ff3b3b;
+    margin-bottom: 28px; caret-color: ${MENU.vermelho};
   `;
   input.style.setProperty("user-select", "text");
   input.style.setProperty("-webkit-user-select", "text");
   input.style.setProperty("-moz-user-select", "text");
   input.style.setProperty("-ms-user-select", "text");
+
+  // o anel de foco padrão do navegador é dourado em vários temas, e destoava depois que o menu
+  // passou a ser vermelho/branco. Marca o foco na própria borda, na cor da paleta.
+  input.style.outline = "none";
+  input.addEventListener("focus", () => (input.style.borderColor = MENU.vermelho));
+  input.addEventListener("blur", () => (input.style.borderColor = "#fff"));
   input.addEventListener("input", () => {
     input.value = input.value.toUpperCase().replace(/[^A-Z0-9 ]/g, "");
   });
@@ -1122,14 +1261,14 @@ export function createNameEntryScreen(onStart: (name: string) => void) {
   button.style.cssText = `
     font-family: ${RETRO_FONT}; font-size: 24px; font-weight: 700; letter-spacing: 2px;
     text-transform: uppercase; padding: 14px 48px;
-    background: #1f8f3d; color: #fff; border: 3px solid #fff;
+    background: ${MENU.vermelho}; color: #fff; border: 3px solid #fff;
     box-shadow: 4px 4px 0 #000; cursor: pointer;
   `;
   button.addEventListener("mouseenter", () => {
-    button.style.background = "#279a49";
+    button.style.background = MENU.vermelhoHover;
   });
   button.addEventListener("mouseleave", () => {
-    button.style.background = "#1f8f3d";
+    button.style.background = MENU.vermelho;
   });
 
   function submit() {
@@ -1145,9 +1284,11 @@ export function createNameEntryScreen(onStart: (name: string) => void) {
   });
 
   el.appendChild(button);
-  document.body.appendChild(el);
+  if (onBack) el.appendChild(createBackButton(onBack));
+  document.body.appendChild(comSomDeMenu(el));
 
   window.setTimeout(() => input.focus(), 0);
+  return menuScreenHandle(el, onBack);
 }
 
 export interface MapOption {
@@ -1156,10 +1297,14 @@ export interface MapOption {
 }
 
 /** Tela de seleção de mapa, mesmo estilo retrô da tela de nome. */
-export function createMapSelectScreen(maps: MapOption[], onSelect: (id: string) => void) {
+export function createMapSelectScreen(
+  maps: MapOption[],
+  onSelect: (id: string) => void,
+  onBack?: () => void
+): MenuScreen {
   const el = document.createElement("div");
   el.style.cssText = `
-    position: fixed; inset: 0; background: #0b0b1a;
+    position: fixed; inset: 0; background: ${MENU.fundo};
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     z-index: 30; font-family: ${RETRO_FONT}; color: #fff; text-align: center; gap: 8px;
   `;
@@ -1176,7 +1321,7 @@ export function createMapSelectScreen(maps: MapOption[], onSelect: (id: string) 
   const title = document.createElement("div");
   title.style.cssText = `
     font-size: 34px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
-    color: #ffe14d; text-shadow: 3px 3px 0 #000; margin-bottom: 32px;
+    color: ${MENU.branco}; text-shadow: 3px 3px 0 #000; margin-bottom: 32px;
   `;
   title.textContent = "Escolha a Pista";
   el.appendChild(title);
@@ -1191,14 +1336,14 @@ export function createMapSelectScreen(maps: MapOption[], onSelect: (id: string) 
     button.style.cssText = `
       font-family: ${RETRO_FONT}; font-size: 22px; font-weight: 700; letter-spacing: 2px;
       text-transform: uppercase; padding: 14px 48px;
-      background: #1f5fb8; color: #fff; border: 3px solid #fff;
+      background: ${MENU.grafite}; color: #fff; border: 3px solid #fff;
       box-shadow: 4px 4px 0 #000; cursor: pointer;
     `;
     button.addEventListener("mouseenter", () => {
-      button.style.background = "#2a6fc9";
+      button.style.background = MENU.grafiteHover;
     });
     button.addEventListener("mouseleave", () => {
-      button.style.background = "#1f5fb8";
+      button.style.background = MENU.grafite;
     });
     button.addEventListener("click", () => {
       el.style.display = "none";
@@ -1207,7 +1352,9 @@ export function createMapSelectScreen(maps: MapOption[], onSelect: (id: string) 
     list.appendChild(button);
   }
 
-  document.body.appendChild(el);
+  if (onBack) el.appendChild(createBackButton(onBack));
+  document.body.appendChild(comSomDeMenu(el));
+  return menuScreenHandle(el, onBack);
 }
 
 export interface CarOption {
@@ -1217,10 +1364,14 @@ export interface CarOption {
 }
 
 /** Tela de seleção de carro (cor), mesmo estilo retrô das outras telas. */
-export function createCarSelectScreen(cars: CarOption[], onSelect: (id: string) => void) {
+export function createCarSelectScreen(
+  cars: CarOption[],
+  onSelect: (id: string) => void,
+  onBack?: () => void
+): MenuScreen {
   const el = document.createElement("div");
   el.style.cssText = `
-    position: fixed; inset: 0; background: #0b0b1a;
+    position: fixed; inset: 0; background: ${MENU.fundo};
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     z-index: 30; font-family: ${RETRO_FONT}; color: #fff; text-align: center; gap: 8px;
   `;
@@ -1237,7 +1388,7 @@ export function createCarSelectScreen(cars: CarOption[], onSelect: (id: string) 
   const title = document.createElement("div");
   title.style.cssText = `
     font-size: 34px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
-    color: #ffe14d; text-shadow: 3px 3px 0 #000; margin-bottom: 32px;
+    color: ${MENU.branco}; text-shadow: 3px 3px 0 #000; margin-bottom: 32px;
   `;
   title.textContent = "Escolha seu Carro";
   el.appendChild(title);
@@ -1251,7 +1402,7 @@ export function createCarSelectScreen(cars: CarOption[], onSelect: (id: string) 
     button.style.cssText = `
       font-family: ${RETRO_FONT}; font-size: 15px; font-weight: 700; letter-spacing: 1px;
       text-transform: uppercase; padding: 16px 18px; width: 130px;
-      background: #14142b; color: #fff; border: 3px solid #fff;
+      background: ${MENU.painel}; color: #fff; border: 3px solid #fff;
       box-shadow: 4px 4px 0 #000; cursor: pointer;
       display: flex; flex-direction: column; align-items: center; gap: 10px;
     `;
@@ -1271,7 +1422,7 @@ export function createCarSelectScreen(cars: CarOption[], onSelect: (id: string) 
       button.style.background = "#20203f";
     });
     button.addEventListener("mouseleave", () => {
-      button.style.background = "#14142b";
+      button.style.background = MENU.painel;
     });
     button.addEventListener("click", () => {
       el.style.display = "none";
@@ -1280,7 +1431,9 @@ export function createCarSelectScreen(cars: CarOption[], onSelect: (id: string) 
     grid.appendChild(button);
   }
 
-  document.body.appendChild(el);
+  if (onBack) el.appendChild(createBackButton(onBack));
+  document.body.appendChild(comSomDeMenu(el));
+  return menuScreenHandle(el, onBack);
 }
 
 export function createMobileControls(onChange: (state: MobileControlState) => void) {

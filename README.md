@@ -17,6 +17,7 @@ Tem modo solo contra bots e modo online com sala privada, servidor autoritativo 
 - HUD estilo retrô SNES: velocímetro com tacômetro, minimapa, tempo de volta, melhor volta, leaderboard ao vivo, badge de posição, marcha, cargas de turbo e medidor de combustível
 - controles mobile por toque (acelerador/freio e joystick de direção)
 - contagem regressiva de largada, banner de volta e tela de vitória
+- menus com identidade própria: logo, paleta tirada da arte, som de clique e navegação pra trás em todas as telas
 
 ## Como rodar localmente
 
@@ -58,7 +59,10 @@ cd server && npm run build && npm start   # servidor
 
 ## Deploy
 
-- **Client**: Vercel, buildando com `npm run build`.
+- **Client**: Vercel, buildando com `npm run build`. Domínio: `topgearweb.com.br`.
+  As URLs do card de compartilhamento no `index.html` são **absolutas** e apontam pra esse domínio —
+  os robôs que montam a prévia (WhatsApp, Discord) não resolvem caminho relativo. Se o domínio
+  mudar, elas precisam mudar junto.
 - **Servidor**: Fly.io (app `topgear-web-mvp`, região `gru`/São Paulo), pelo `server/Dockerfile`.
   A máquina fica com `auto_stop_machines = false` de propósito — hibernação por inatividade
   derruba conexão WebSocket no meio da corrida.
@@ -76,6 +80,8 @@ cd server && npm run build && npm start   # servidor
 | A | virar pra esquerda |
 | D | virar pra direita |
 | Espaço ou Shift | turbo (3 cargas por corrida) |
+
+Nas telas de menu, **Esc** faz o mesmo que o botão "Voltar".
 
 ### Mobile
 
@@ -119,6 +125,31 @@ Mora dentro de `server/` porque o servidor é a autoridade no multiplayer, e por
 Se essas coisas divergirem entre os dois lados, os sintomas são silenciosos e chatos de achar (bot
 dirigindo por cima da grama, carro que não obedece direito, volta que não conta) — por isso existe
 um lugar só.
+
+## Imagens e som
+
+```
+assets/     originais em alta (NAO vao pro deploy)
+public/     versões otimizadas, servidas como estão
+```
+
+Tudo que está em `public/` é copiado pro deploy do jeito que está, então lá só entra o que
+realmente é servido. Os originais (1254x1254 e 1774x887, ~700 KB cada) ficam em `assets/` como
+fonte pra regerar quando precisar.
+
+| Arquivo | Uso |
+| --- | --- |
+| `public/icon-32.png` | favicon da aba |
+| `public/icon-180.png` | ícone de atalho no iOS/Android |
+| `public/logo.png` | logo das telas de menu (900px de largura) |
+| `public/og-image.png` | card de compartilhamento, 1200x630 |
+| `public/sound.mp3` | clique dos botões de menu |
+
+As imagens servidas usam **paleta indexada de 128 cores**, o que é quase de graça em pixel art e
+derruba muito o peso: as quatro somam ~58 KB contra os 1,4 MB dos dois originais. Pra um jogo cujo
+bundle inteiro tem ~700 KB, servir o original dobraria o download da primeira visita.
+
+O som toca só nos **botões de menu** — durante a corrida o jogo é mudo. Ver `src/audio.ts`.
 
 ## Tema visual
 

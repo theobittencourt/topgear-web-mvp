@@ -36,6 +36,7 @@ import {
   createMobileControls,
   createPositionBadge,
 } from "./ui";
+import type { MenuScreen } from "./ui";
 
 const app = document.getElementById("app")!;
 
@@ -753,77 +754,142 @@ const lobbyScreen = createLobbyScreen();
 
 const mapOptions = TRACK_PRESETS.map((p) => ({ id: p.id, name: p.name }));
 
-/** Solo: mapa -> carro -> nome -> jogo (mesma ordem de sempre). */
-function startSoloFlow() {
-  createMapSelectScreen(mapOptions, (mapId) => {
-    const config = TRACK_PRESETS.find((p) => p.id === mapId) ?? TRACK_PRESETS[0];
-    createCarSelectScreen(CAR_OPTIONS, (carId) => {
-      const carOption = CAR_OPTIONS.find((c) => c.id === carId) ?? CAR_OPTIONS[0];
-      createNameEntryScreen((name) => {
-        loadingScreen.show();
-        // setTimeout (não rAF) pra garantir que a tela de loading realmente pintou antes de
-        // travar a thread principal com o trabalho síncrono pesado de montar a pista — rAF sozinho
-        // pode nunca disparar se a aba perder foco bem nesse instante
-        window.setTimeout(() => {
-          startGame(config, carOption.color, name);
-          loadingScreen.hide();
-        }, 50);
-      });
-    });
-  });
+/**
+ * Solo: mapa -> carro -> nome -> jogo.
+ *
+ * Cada tela recebe como voltar pra anterior. Voltar DESTRÓI a tela atual em vez de só escondê-la —
+ * seguir em frente sempre cria uma tela nova, então guardar as antigas empilharia telas mortas a
+ * cada ida e volta.
+ */
+function startSoloFlow(telaAnterior: MenuScreen) {
+  const mapa = createMapSelectScreen(
+    mapOptions,
+    (mapId) => {
+      const config = TRACK_PRESETS.find((p) => p.id === mapId) ?? TRACK_PRESETS[0];
+
+      const carro = createCarSelectScreen(
+        CAR_OPTIONS,
+        (carId) => {
+          const carOption = CAR_OPTIONS.find((c) => c.id === carId) ?? CAR_OPTIONS[0];
+
+          const nome = createNameEntryScreen(
+            (name) => {
+              loadingScreen.show();
+              // setTimeout (não rAF) pra garantir que a tela de loading realmente pintou antes de
+              // travar a thread principal com o trabalho síncrono pesado de montar a pista — rAF
+              // sozinho pode nunca disparar se a aba perder foco bem nesse instante
+              window.setTimeout(() => {
+                startGame(config, carOption.color, name);
+                loadingScreen.hide();
+              }, 50);
+            },
+            () => {
+              nome.destroy();
+              carro.show();
+            }
+          );
+        },
+        () => {
+          carro.destroy();
+          mapa.show();
+        }
+      );
+    },
+    () => {
+      mapa.destroy();
+      telaAnterior.show();
+    }
+  );
 }
 
 /**
  * Multiplayer: carro -> nome -> criar sala (aí sim escolhe o mapa) OU entrar com código (o mapa
  * já vem do host, então nem pergunta).
  */
-function startMultiplayerFlow() {
-  createCarSelectScreen(CAR_OPTIONS, (carId) => {
-    const carOption = CAR_OPTIONS.find((c) => c.id === carId) ?? CAR_OPTIONS[0];
-    createNameEntryScreen((name) => {
-      createOnlineChoiceScreen(
-        () => {
-          createMapSelectScreen(mapOptions, (mapId) => {
-            const config = TRACK_PRESETS.find((p) => p.id === mapId) ?? TRACK_PRESETS[0];
-            loadingScreen.setText("Criando sala...");
-            loadingScreen.show();
-            createLobby(name, carOption.color, config.id)
-              .then((room) => {
-                startMultiplayerGame(config, room);
-                loadingScreen.hide();
-              })
-              .catch((err) => {
-                console.error("Falha ao criar sala:", err);
-                loadingScreen.hide();
-                alert("Não foi possível criar a sala. Verifique se o servidor está rodando.");
-              });
-          });
+function startMultiplayerFlow(telaAnterior: MenuScreen) {
+  const carro = createCarSelectScreen(
+    CAR_OPTIONS,
+    (carId) => {
+      const carOption = CAR_OPTIONS.find((c) => c.id === carId) ?? CAR_OPTIONS[0];
+
+      const nome = createNameEntryScreen(
+        (name) => {
+          const escolha = createOnlineChoiceScreen(
+            () => {
+              const mapa = createMapSelectScreen(
+                mapOptions,
+                (mapId) => {
+                  const config = TRACK_PRESETS.find((p) => p.id === mapId) ?? TRACK_PRESETS[0];
+                  loadingScreen.setText("Criando sala...");
+                  loadingScreen.show();
+                  createLobby(name, carOption.color, config.id)
+                    .then((room) => {
+                      startMultiplayerGame(config, room);
+                      loadingScreen.hide();
+                    })
+                    .catch((err) => {
+                      console.error("Falha ao criar sala:", err);
+                      loadingScreen.hide();
+                      alert("Não foi possível criar a sala. Verifique se o servidor está rodando.");
+                      // sem isto o jogador ficava numa tela preta: a seleção de mapa já tinha se
+                      // escondido sozinha ao ser clicada, e não sobrava nada na tela
+                      mapa.show();
+                    });
+                },
+                () => {
+                  mapa.destroy();
+                  escolha.show();
+                }
+              );
+            },
+            () => {
+              const codigo = createCodeEntryScreen(
+                (code) => {
+                  loadingScreen.setText("Entrando na sala...");
+                  loadingScreen.show();
+                  joinLobby(code, name, carOption.color)
+                    .then((room) => {
+                      // quem entra por código não escolhe o mapa — usa o que o host já definiu
+                      const actualConfig =
+                        TRACK_PRESETS.find((p) => p.id === (room.state as any).mapId) ??
+                        TRACK_PRESETS[0];
+                      startMultiplayerGame(actualConfig, room);
+                      loadingScreen.hide();
+                    })
+                    .catch((err) => {
+                      console.error("Falha ao entrar na sala:", err);
+                      loadingScreen.hide();
+                      alert("Não foi possível entrar na sala. Confira o código com quem criou.");
+                      // devolve a tela do código pra dar pra corrigir e tentar de novo
+                      codigo.show();
+                    });
+                },
+                () => {
+                  codigo.destroy();
+                  escolha.show();
+                }
+              );
+            },
+            () => {
+              escolha.destroy();
+              nome.show();
+            }
+          );
         },
         () => {
-          createCodeEntryScreen((code) => {
-            loadingScreen.setText("Entrando na sala...");
-            loadingScreen.show();
-            joinLobby(code, name, carOption.color)
-              .then((room) => {
-                // quem entra por código não escolhe o mapa — usa o que o host já definiu
-                const actualConfig =
-                  TRACK_PRESETS.find((p) => p.id === (room.state as any).mapId) ?? TRACK_PRESETS[0];
-                startMultiplayerGame(actualConfig, room);
-                loadingScreen.hide();
-              })
-              .catch((err) => {
-                console.error("Falha ao entrar na sala:", err);
-                loadingScreen.hide();
-                alert("Não foi possível entrar na sala. Confira o código com quem criou.");
-              });
-          });
+          nome.destroy();
+          carro.show();
         }
       );
-    });
-  });
+    },
+    () => {
+      carro.destroy();
+      telaAnterior.show();
+    }
+  );
 }
 
-createModeSelectScreen((mode) => {
-  if (mode === "solo") startSoloFlow();
-  else startMultiplayerFlow();
+const modeScreen = createModeSelectScreen((mode) => {
+  if (mode === "solo") startSoloFlow(modeScreen);
+  else startMultiplayerFlow(modeScreen);
 });
