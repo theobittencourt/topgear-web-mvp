@@ -60,7 +60,7 @@ Controles: **W** acelera, **S** freia/ré, **A/D** viram, **espaço/shift** disp
 - [x] Um renderer e uma cena só, desenhados 2× por frame com `setScissorTest` + `setViewport`/`setScissor`
 - [x] Câmera, HUD, minimapa, leaderboard e mensagens independentes por metade, com etiqueta P1/P2 na cor do carro
 - [x] Teclas por posição física (`KeyboardEvent.code`): WASD pro P1, setas pro P2, sem uma atrapalhar a outra
-- [x] Controle de videogame opcional (controle 1 → P1, controle 2 → P2), somando com o teclado
+- [x] Controle de videogame opcional nos três modos (no local, controle 1 → P1 e controle 2 → P2), somando com o teclado em vez de substituí-lo
 - [x] Tela de setup: cor de cada jogador (nunca iguais), quantidade de bots (0 a 8), pista e orientação da divisão
 - [x] A corrida acaba quando os DOIS humanos terminam (ou no timeout); quem chega antes vê "FINISH + posição" e o carro dele passa pra IA
 - [x] Classificação final com tempo total e melhor volta, destacando P1 e P2, com "Revanche" e "Menu"
@@ -206,6 +206,8 @@ Controles: **W** acelera, **S** freia/ré, **A/D** viram, **espaço/shift** disp
 - **Pulso tem que ser descartado na pausa**: o turbo é um pulso guardado até alguém consumir. Sem limpar os pulsos ao pausar, o Esc que pausou (ou um turbo apertado durante a pausa) disparava no primeiro frame depois de despausar.
 - **O retrô saiu de graça no split**: o tema pixelado encolhe o BUFFER do renderer, e `setViewport`/`setScissor` trabalham nas unidades desse buffer — cada metade já nasce pixelada na mesma proporção, sem render target por jogador.
 - **O `fov` do three.js é VERTICAL**: mantendo-o fixo, a metade de cima/baixo mostraria o dobro de mundo na horizontal e a pista pareceria grande-angular. A conta em `viewports.ts` segura o enquadramento horizontal no split cima/baixo e o vertical no lado a lado; em tela cheia as duas dão o mesmo número, então o solo não mudou.
+- **O navegador esconde o controle até alguém apertar um botão nele**: `navigator.getGamepads()` devolve uma lista vazia com o controle plugado e ligado, porque revelar o hardware sem interação seria mais um dado pra identificar a máquina. Sem avisar isso na tela, a conclusão natural de quem testa é "o jogo não suporta controle" — por isso o setup do modo local mostra o que está vendo e diz o que fazer quando não vê nada.
+- **Controle não pode anular teclado**: a tentação é tratar "tem controle conectado" como um modo. Mas um controle parado reporta zero em tudo, e isso sobrescreveria o teclado — plugar um controle faria o teclado "parar de funcionar". As fontes se somam (`Math.max` no acelerador, e o analógico só manda quando sai do centro).
 - **`renderer.info` é zerado a cada `render()`**: na tela dividida são dois por frame, então medir sem `info.autoReset = false` mostra só o segundo passe — metade da verdade, que foi exatamente o número errado que apareceu na primeira medição.
 - **Fim de corrida deixou de ser um evento da corrida e virou um evento de cada carro**: `RaceProgress.finish(colocação)` por carro, e a regra de quando a corrida acaba (`firstFinisher` no solo, `allHumans` no local) é parâmetro da sessão. Sem isso o segundo jogador perderia a corrida no instante em que o primeiro cruzasse a linha.
 

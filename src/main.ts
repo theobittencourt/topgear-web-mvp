@@ -129,7 +129,7 @@ function startMultiplayerGame(config: TrackConfig, room: Room) {
   const cars = new Map<string, RemoteCar>();
   let localCar: RemoteCar | null = null;
 
-  const input = new HumanInput(KEYMAPS.solo, { mobile: isMobileDevice });
+  const input = new HumanInput(KEYMAPS.solo, { mobile: isMobileDevice, gamepadIndex: 0 });
 
   // último input já enviado, pra não repetir pacote idêntico a cada frame (ver o send lá embaixo)
   const sentInput = { throttle: -1, brake: -1, steer: -1 };
@@ -501,7 +501,17 @@ function startSoloFlow(telaAnterior: MenuScreen) {
 function startSolo(config: TrackConfig, carColor: number, playerName: string) {
   startOfflineRace({
     config,
-    players: [{ label: playerName, color: carColor, keymap: KEYMAPS.solo, mobile: isMobileDevice }],
+    players: [
+      {
+        label: playerName,
+        color: carColor,
+        keymap: KEYMAPS.solo,
+        mobile: isMobileDevice,
+        // sozinho na tela, o jogador fica com o primeiro controle conectado (e o teclado continua
+        // valendo ao mesmo tempo)
+        gamepadIndex: 0,
+      },
+    ],
     botCount: MAX_BOTS,
     endRule: "firstFinisher",
     onRaceEnd(standings) {

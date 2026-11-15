@@ -1,6 +1,7 @@
 import { getTheme, setTheme } from "./retro";
 import { playMenuClick, isSoundEnabled, setSoundEnabled } from "./audio";
 import { formatTime } from "./raceTimer";
+import { connectedGamepads } from "./input";
 import type { VisualTheme } from "./retro";
 
 export interface RacerDisplay {
@@ -2116,9 +2117,56 @@ export function createLocalSetupScreen(
   controls.innerHTML = `
     <div><span style="color:${MENU.prata};">P1</span> &nbsp;W A S D &nbsp;·&nbsp; turbo: shift esquerdo / espaço</div>
     <div><span style="color:${MENU.prata};">P2</span> &nbsp;setas &nbsp;·&nbsp; turbo: shift direito / enter</div>
-    <div>pausa: esc ou P &nbsp;·&nbsp; controle de videogame também funciona</div>
+    <div>pausa: esc ou P</div>
   `;
   el.appendChild(controls);
+
+  // ---- controles de videogame detectados ----
+  // O navegador só revela um controle depois que alguém aperta um botão nele, então sem este
+  // aviso a impressão é de que o jogo não suporta controle — quando na verdade ele ainda não
+  // existe pro navegador. Por isso a tela diz o que está vendo, e diz o que fazer quando não vê.
+  const pads = document.createElement("div");
+  pads.style.cssText = `
+    margin-top: 10px; font-size: 11.5px; line-height: 1.7; letter-spacing: 1px;
+    min-height: 34px;
+  `;
+
+  function nomeCurto(id: string): string {
+    // o id vem tipo "Xbox 360 Controller (XINPUT STANDARD GAMEPAD)" — a parte entre parênteses é
+    // identificação de driver e não ajuda ninguém a reconhecer o próprio controle
+    const limpo = id.replace(/\s*\([^)]*\)\s*/g, " ").trim() || id;
+    return limpo.length > 30 ? `${limpo.slice(0, 29)}…` : limpo;
+  }
+
+  function pintarPads() {
+    const lista = connectedGamepads();
+    if (lista.length === 0) {
+      pads.innerHTML = `<div style="color:${MENU.apagado};">
+        Nenhum controle detectado — plugue e <b style="color:${MENU.prata};">aperte um botão nele</b> pra aparecer aqui
+      </div>`;
+      return;
+    }
+    pads.innerHTML = lista
+      .slice(0, 2)
+      .map(
+        (id, i) =>
+          `<div style="color:${MENU.apagado};">
+            <span style="color:${MENU.vermelho};">${i === 0 ? "P1" : "P2"}</span>
+            &nbsp;controle ${i + 1}: ${nomeCurto(id)}
+          </div>`
+      )
+      .join("");
+  }
+
+  pintarPads();
+  el.appendChild(pads);
+
+  // o evento resolve o caso comum (plugar/desplugar com a tela aberta); a sondagem cobre o resto,
+  // porque alguns navegadores só passam a enxergar o controle no primeiro `getGamepads`
+  const aoMudarPad = () => pintarPads();
+  window.addEventListener("gamepadconnected", aoMudarPad);
+  window.addEventListener("gamepaddisconnected", aoMudarPad);
+  const sondagemPads = window.setInterval(pintarPads, 1000);
 
   const start = document.createElement("button");
   start.textContent = "Largar";
@@ -2142,7 +2190,19 @@ export function createLocalSetupScreen(
 
   if (onBack) el.appendChild(createBackButton(onBack));
   document.body.appendChild(comSomDeMenu(el));
-  return menuScreenHandle(el, onBack);
+
+  // esta tela tem estado VIVO (a sondagem de controles), então o destroy dela precisa desligar
+  // isso além de tirar o elemento do DOM — senão o timer segue rodando contra uma tela morta
+  const handle = menuScreenHandle(el, onBack);
+  return {
+    ...handle,
+    destroy() {
+      window.clearInterval(sondagemPads);
+      window.removeEventListener("gamepadconnected", aoMudarPad);
+      window.removeEventListener("gamepaddisconnected", aoMudarPad);
+      handle.destroy();
+    },
+  };
 }
 
 export interface StandingRow {

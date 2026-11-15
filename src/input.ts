@@ -196,15 +196,36 @@ interface PadReading {
 const padNitroHeld = new Map<number, boolean>();
 
 const AXIS_DEADZONE = 0.18;
-const TRIGGER_THRESHOLD = 0.3;
+/** o gatilho só começa a valer depois de um tiquinho de curso, pra não disparar sozinho */
+const TRIGGER_DEADZONE = 0.08;
+
+/**
+ * Lista os controles conectados, na ordem em que o navegador os entrega (o 0 é o do jogador 1).
+ *
+ * Serve pra TELA mostrar o que está vendo. Importante saber: o Chrome só revela um controle depois
+ * que alguém APERTA UM BOTÃO nele — até lá ele não aparece aqui nem no jogo, mesmo plugado. É a
+ * proteção do navegador contra identificar a máquina sem o usuário pedir.
+ */
+export function connectedGamepads(): string[] {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  const nomes: string[] = [];
+  for (const pad of pads) {
+    if (pad && pad.connected) nomes.push(pad.id);
+  }
+  return nomes;
+}
 
 /**
  * Lê um controle pelo índice (controle 1 = 0, controle 2 = 1).
  *
  * Devolve `null` quando aquele controle não está conectado — é isso que faz o teclado continuar
- * valendo sozinho. Mapeamento no padrão "standard" do navegador: A acelera, B freia, X/Y/RB dão
- * turbo, analógico esquerdo (ou o direcional) esterça, e os gatilhos também valem como
- * acelerar/frear.
+ * valendo sozinho, sem "modo controle" pra entrar ou sair.
+ *
+ * Mapeamento no padrão "standard" do navegador (Xbox, DualShock/DualSense e a maioria dos genéricos
+ * caem nele): RT ou A aceleram, LT ou B freiam, analógico esquerdo ou direcional esterçam, e
+ * X/Y/RB dão turbo. Num controle que o navegador NÃO reconhece como "standard" a numeração dos
+ * botões é imprevisível, então aí só o analógico e os dois primeiros botões são usados — melhor um
+ * controle meio mapeado do que um que acelera sozinho.
  */
 function readGamepad(index: number): PadReading | null {
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -214,23 +235,28 @@ function readGamepad(index: number): PadReading | null {
     return null;
   }
 
+  const standard = pad.mapping === "standard";
   const button = (i: number) => pad.buttons[i]?.pressed === true;
-  const trigger = (i: number) => (pad.buttons[i]?.value ?? 0) > TRIGGER_THRESHOLD;
+  /** valor ANALÓGICO do gatilho: acelerar na metade do curso acelera pela metade */
+  const trigger = (i: number) => {
+    const value = pad.buttons[i]?.value ?? 0;
+    return value > TRIGGER_DEADZONE ? Math.min(1, value) : 0;
+  };
 
   const axis = pad.axes[0] ?? 0;
   let steer = Math.abs(axis) > AXIS_DEADZONE ? Math.max(-1, Math.min(1, axis)) : 0;
-  if (steer === 0) {
+  if (steer === 0 && standard) {
     if (button(14)) steer = -1; // direcional esquerda
     if (button(15)) steer = 1; // direcional direita
   }
 
-  const nitroDown = button(2) || button(3) || button(5);
+  const nitroDown = standard && (button(2) || button(3) || button(5));
   const nitro = nitroDown && !padNitroHeld.get(index);
   padNitroHeld.set(index, nitroDown);
 
   return {
-    throttle: button(0) || trigger(7) ? 1 : 0,
-    brake: button(1) || trigger(6) ? 1 : 0,
+    throttle: Math.max(button(0) ? 1 : 0, standard ? trigger(7) : 0),
+    brake: Math.max(button(1) ? 1 : 0, standard ? trigger(6) : 0),
     steer,
     nitro,
   };

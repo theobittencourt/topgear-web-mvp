@@ -103,15 +103,34 @@ No modo local, cada jogador fica com metade do teclado:
 As teclas são lidas por **posição física** (`KeyboardEvent.code`), então funcionam igual em ABNT2,
 QWERTY americano, AZERTY e afins. Os mapeamentos ficam todos em `KEYMAPS`, em `src/input.ts`.
 
-**Controle de videogame** também funciona: o controle 1 vai pro jogador 1 e o 2 pro jogador 2
-(A acelera, B freia, analógico esquerdo ou direcional esterça, X/Y/RB dão turbo). O teclado
-continua valendo ao mesmo tempo, sem precisar trocar de "modo".
-
 Nas telas de menu, **Esc** faz o mesmo que o botão "Voltar".
 
 > **Teclado com ghosting:** teclado de membrana barato costuma ignorar algumas combinações de 3+
 > teclas apertadas juntas (é limitação do hardware, não do jogo). Se W+A junto com ↑+→ falhar,
 > o jeito é usar um teclado com anti-ghosting/NKRO — ou um dos dois jogar no controle.
+
+### Controle de videogame
+
+Funciona nos três modos (solo, local e online), em qualquer controle que o navegador reconheça
+como "standard" — Xbox, DualShock/DualSense e a maioria dos genéricos:
+
+| Comando | Ação |
+| --- | --- |
+| RT ou A | acelerar (o gatilho é analógico: meio curso, meia aceleração) |
+| LT ou B | frear / ré |
+| Analógico esquerdo ou direcional | esterçar (analógico, mais fino que o teclado) |
+| X, Y ou RB | turbo |
+
+No modo local, o **controle 1 vai pro jogador 1 e o 2 pro jogador 2**. O teclado continua valendo
+ao mesmo tempo, sem precisar trocar de "modo" — dá pra um jogar no controle e o outro no teclado.
+
+> **O controle não aparece até você apertar um botão nele.** Não é bug do jogo: o navegador só
+> revela um controle depois de uma interação, pra não identificar sua máquina sem você pedir. A
+> tela de setup do modo local mostra quais controles ele já está vendo.
+
+Num controle que o navegador **não** classifica como "standard", a numeração dos botões é
+imprevisível, então o jogo usa só o analógico e os dois primeiros botões — melhor meio mapeado do
+que acelerando sozinho.
 
 ### Mobile
 
