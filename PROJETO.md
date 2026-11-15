@@ -45,7 +45,7 @@ Controles: **W** acelera, **S** freia/ré, **A/D** viram, **espaço/shift** disp
 - [x] Física simples (aceleração, atrito, curva dependente da velocidade)
 - [x] Câmera em terceira pessoa seguindo o carro
 - [x] Colisão entre carros tipo "bumper car" (empurrão lateral proporcional à sobreposição)
-- [x] Recuperação de pista: sair do asfalto por mais de meio segundo devolve o carro pro último ponto válido, com aviso "FORA DA PISTA!" (só no solo)
+- [x] Recuperação de pista: sair do asfalto por mais de meio segundo devolve o carro pro último ponto válido, com aviso "FORA DA PISTA!" (nos modos offline; no online ainda não)
 - [x] Largada em grid com countdown "3, 2, 1, VAI!"
 - [x] Corrida de `TOTAL_LAPS` voltas, com tela de vitória e botão de reiniciar
 - [x] Turbo com 3 cargas por corrida (espaço/shift no teclado, botão `N` no mobile), funcionando igual no solo e no online
@@ -54,6 +54,19 @@ Controles: **W** acelera, **S** freia/ré, **A/D** viram, **espaço/shift** disp
 ### Modo solo
 - [x] 9 carros adversários controlados por IA, com velocidades de cruzeiro diferentes
 - [x] Bots competitivos (cruzeiro quase no máximo do jogador) e capazes de dar ré quando ficam travados
+
+### Modo local (2 jogadores no mesmo teclado)
+- [x] Tela dividida cima/baixo (padrão, igual ao Top Gear de SNES) ou lado a lado, escolhida no setup
+- [x] Um renderer e uma cena só, desenhados 2× por frame com `setScissorTest` + `setViewport`/`setScissor`
+- [x] Câmera, HUD, minimapa, leaderboard e mensagens independentes por metade, com etiqueta P1/P2 na cor do carro
+- [x] Teclas por posição física (`KeyboardEvent.code`): WASD pro P1, setas pro P2, sem uma atrapalhar a outra
+- [x] Controle de videogame opcional (controle 1 → P1, controle 2 → P2), somando com o teclado
+- [x] Tela de setup: cor de cada jogador (nunca iguais), quantidade de bots (0 a 8), pista e orientação da divisão
+- [x] A corrida acaba quando os DOIS humanos terminam (ou no timeout); quem chega antes vê "FINISH + posição" e o carro dele passa pra IA
+- [x] Classificação final com tempo total e melhor volta, destacando P1 e P2, com "Revanche" e "Menu"
+- [x] Pausa compartilhada (Esc ou P) que congela física e áudio dos dois
+- [x] Som de motor por jogador, com panorâmica estéreo na divisão lado a lado
+- [x] Volta pro menu com `dispose` de verdade (cena, geometria, textura, HUD, listeners e áudio) — sem recarregar a página
 
 ### Modo online
 - [x] Sala privada com código pra compartilhar, de 5 a 10 carros
@@ -84,21 +97,28 @@ Controles: **W** acelera, **S** freia/ré, **A/D** viram, **espaço/shift** disp
 - [ ] Bots muito rápidos/precisos pra quem está aprendendo a dirigir — considerar dificuldade progressiva
 - [ ] Countdown do client é fixo em 4×1s e ignora o `state.countdown` que o servidor já sincroniza
 - [ ] Sem testes automatizados, sem lint, sem CI
-- [ ] `main.ts` tem dois loops de render quase idênticos (solo e online), com o bloco de HUD/câmera duplicado
+- [ ] O online ainda tem o loop de render dele em `main.ts` — o HUD e a viewport já são os mesmos do offline, mas o laço em si não dá pra unificar enquanto a posição dos carros vier pronta do servidor
+- [ ] Não tem detecção de "WRONG WAY" (o aviso que existe é o de sair da pista)
+- [ ] Nenhuma tela pra remapear teclas, embora os mapas já estejam centralizados em `KEYMAPS`
 - [ ] A sala de espera não tem "Voltar" — sair dela exigiria `room.leave()` e desfazer a conexão, que é mais do que trocar de tela
 
 ## Arquivos principais
 
 ### Client (`src/`)
+- `input.ts` — `KEYMAPS` (teclas por posição física), o teclado compartilhado, `HumanInput` (teclado + toque + controle) e `BotInput` (a IA dos bots como fonte de input)
+- `renderer.ts` — o `WebGLRenderer` e o canvas únicos da sessão, e o aviso de resize pra quem tem câmera
+- `race/offlineRace.ts` — a corrida do solo e do local: N jogadores locais + bots, regras de fim, pausa e `dispose`
+- `race/scene.ts` — cena 3D de uma corrida (luz, céu, fog, pista, grid), com `dispose` de geometria/material/textura
+- `race/viewports.ts` — câmera + pedaço de tela + container de HUD por jogador; tela cheia e tela dividida são o mesmo código
 - `track.ts` — malha 3D da pista (asfalto, acostamento, meio-fio, barrancos, túnel), elevação, paleta de cada mapa e cenário instanciado
-- `car.ts` — modelo do carro (`createCarMesh`), `CarController` (jogador) e `AICarController` (segue waypoints)
+- `car.ts` — modelo do carro (`createCarMesh`) e `CarController` (a física local, que não sabe de onde vem o comando)
 - `collision.ts` — resolução de colisão entre carros por sobreposição de raio
-- `raceTimer.ts` — `RaceProgress` (progresso/voltas no solo) e `LapClock` (só cronômetro, usado no online)
+- `raceTimer.ts` — `RaceProgress` (progresso, voltas e chegada nos modos offline) e `LapClock` (só cronômetro, usado no online)
 - `ui.ts` — HUD e todas as telas (DOM puro)
 - `retro.ts` — tema visual (`VISUAL`), direção de arte (`ART`) e a escala de resolução interna
 - `sprites.ts` — sprites 2D de beira de pista, desenhados em canvas e instanciados
-- `audio.ts` — som de interface (só o clique de menu por enquanto)
-- `main.ts` — monta a cena, o fluxo de telas e os dois loops de jogo
+- `audio.ts` — clique de menu (arquivo) e o áudio da corrida sintetizado na Web Audio (motor por jogador com `StereoPannerNode`, batida e turbo)
+- `main.ts` — fluxo de telas (solo, local e online) e o loop do modo online
 - `network.ts` — conexão com o servidor Colyseus
 
 ### Servidor (`server/src/`)
@@ -178,7 +198,20 @@ Controles: **W** acelera, **S** freia/ré, **A/D** viram, **espaço/shift** disp
 - **Listener de teclado precisa morrer junto com a tela**: o Esc é registrado no `window` (uma `div` não recebe tecla sem foco), então sem remover no `destroy()` uma tela já destruída continuaria respondendo ao Esc.
 - **Falha de rede deixava tela preta**: quando criar/entrar em sala falhava, o jogador ficava olhando pro nada — a seleção já tinha se escondido sozinha ao ser clicada e o loading sumia no `catch`. Agora o `catch` devolve a tela anterior, dando pra corrigir e tentar de novo.
 
+### Tela dividida e jogadores locais
+- **O "jogador único" não estava num lugar só**: ele estava espalhado em cinco (uma câmera de módulo, `camera.aspect = innerWidth/innerHeight` dentro do resize do tema visual, um `keys` global, HUD pregado no `body` com `position: fixed`, e `racers[0]` sendo "eu"). O modo local só ficou viável depois de trocar isso por uma LISTA de jogadores locais — solo virou o caso de tamanho 1, e a diferença entre os modos ficou toda na montagem da sessão (`startOfflineRace`), não em `if (modo === ...)` espalhado.
+- **Input como interface, não como tipo de carro**: `getControls()` devolve `{ throttle, brake, steer, nitro }` venha de teclado, controle ou IA. O ganho prático apareceu sozinho: quando um jogador cruza a chegada, o carro dele recebe um `BotInput` e continua andando em vez de virar um muro parado na pista — foram duas linhas, porque a física nunca soube quem estava dirigindo.
+- **`KeyboardEvent.code`, não `key`**: `code` é a posição física da tecla. Com `key`, teclado ABNT2/AZERTY e as dead keys de acento entregam valores que não batem com o desenho das teclas que o jogador está vendo.
+- **Tecla presa ao trocar de aba**: perder o foco não gera `keyup`, então o carro continuava acelerando sozinho ao voltar. `blur` + `visibilitychange` limpam o conjunto de teclas apertadas.
+- **Pulso tem que ser descartado na pausa**: o turbo é um pulso guardado até alguém consumir. Sem limpar os pulsos ao pausar, o Esc que pausou (ou um turbo apertado durante a pausa) disparava no primeiro frame depois de despausar.
+- **O retrô saiu de graça no split**: o tema pixelado encolhe o BUFFER do renderer, e `setViewport`/`setScissor` trabalham nas unidades desse buffer — cada metade já nasce pixelada na mesma proporção, sem render target por jogador.
+- **O `fov` do three.js é VERTICAL**: mantendo-o fixo, a metade de cima/baixo mostraria o dobro de mundo na horizontal e a pista pareceria grande-angular. A conta em `viewports.ts` segura o enquadramento horizontal no split cima/baixo e o vertical no lado a lado; em tela cheia as duas dão o mesmo número, então o solo não mudou.
+- **`renderer.info` é zerado a cada `render()`**: na tela dividida são dois por frame, então medir sem `info.autoReset = false` mostra só o segundo passe — metade da verdade, que foi exatamente o número errado que apareceu na primeira medição.
+- **Fim de corrida deixou de ser um evento da corrida e virou um evento de cada carro**: `RaceProgress.finish(colocação)` por carro, e a regra de quando a corrida acaba (`firstFinisher` no solo, `allHumans` no local) é parâmetro da sessão. Sem isso o segundo jogador perderia a corrida no instante em que o primeiro cruzasse a linha.
+
 ### Performance
+- **Tela dividida no tema Moderno custou ~0,5 ms de CPU por frame** (medido com `?stats=1` na URL, numa janela de 1024×768): solo com 1 jogador + 9 bots dá ~2,2 ms de CPU por frame e ~340 draw calls; local com 2 jogadores + 4 bots dá ~2,7 ms e ~320 draw calls somando os dois passes, com os triângulos dobrando (46k → 82k, que é o esperado quando a cena é desenhada duas vezes). Os dois ficaram travados em 82,5 fps num monitor de 165 Hz — ou seja, limitados pelo vsync e não pelo jogo, com folga confortável sobre a meta de 60.
+- **O que segura o custo do split**: sombra atualizada em frames alternados (`shadowMap.autoUpdate = false` + `needsUpdate`, já que o sol não se move), leaderboard redesenhado a ~6 Hz em vez de 60 (ele só muda quando alguém ultrapassa, e redesenhá-lo 2× por frame era trabalho de layout jogado fora), e os sprites de beira de pista regirados uma vez por passe — que é obrigatório, já que cada câmera olha pra um lado.
 - **O maior gargalo era draw call, não polígono**: cada árvore/montanha/nuvem era um `Group` com meshes e materiais próprios — ~300 árvores × 3 peças, 92 montanhas e ~180 esferas de nuvem davam mais de 1.200 draw calls e ~700 materiais distintos por frame. Trocando por `InstancedMesh` (com cor por instância via `setColorAt` onde ela varia), o mapa estádio foi pra **28 draw calls e 19 materiais**, com 1.259 objetos dentro de 9 instâncias.
 - **Luz dinâmica custa em todo material da cena, não só no que ela ilumina**: o mapa noturno tinha ~20 `PointLight` (uma por poste, mais as do túnel), e cada uma entra no shader de *todos* os materiais. Reduzido pra 8 acendendo só 1 a cada N postes, com intensidade e alcance maiores pra compensar — as luminárias continuam todas visíveis porque o "bulbo" é material emissivo, que não custa nada. As constantes `NIGHT_LAMP_LIGHT_EVERY` e `TUNNEL_LIGHT_EVERY` em `track.ts` regulam isso.
 - Ao instanciar um objeto que era um `Group` com filhos em alturas locais e escala uniforme no pai, a matriz da instância vira posição `(x, alturaLocal * escala, z)` com aquela mesma escala — não dá pra só copiar a altura local.

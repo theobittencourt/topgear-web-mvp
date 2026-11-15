@@ -5,7 +5,23 @@ import { CarController } from "./car";
 const CAR_RADIUS = 2.2;
 const PUSH_STRENGTH = 30;
 
-export function resolveCarCollisions(cars: CarController[]) {
+/** Uma batida resolvida neste frame — quem bateu em quem e com que força. */
+export interface CarCollision {
+  a: number;
+  b: number;
+  /** quanto os dois estavam sobrepostos, em unidades de mundo */
+  overlap: number;
+}
+
+/**
+ * Separa e empurra os carros que se sobrepõem, e devolve as batidas do frame.
+ *
+ * A lista de volta existe pro áudio: o som de batida toca pra QUEM bateu (ver `offlineRace`), e sem
+ * isso o laço de jogo não teria como saber quais carros se tocaram.
+ */
+export function resolveCarCollisions(cars: CarController[]): CarCollision[] {
+  const hits: CarCollision[] = [];
+
   for (let i = 0; i < cars.length; i++) {
     for (let j = i + 1; j < cars.length; j++) {
       const a = cars[i];
@@ -32,7 +48,11 @@ export function resolveCarCollisions(cars: CarController[]) {
         a.bumpVelocity.y += nz * impulse;
         b.bumpVelocity.x -= nx * impulse;
         b.bumpVelocity.y -= nz * impulse;
+
+        hits.push({ a: i, b: j, overlap });
       }
     }
   }
+
+  return hits;
 }

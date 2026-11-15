@@ -1,5 +1,6 @@
 import { getTheme, setTheme } from "./retro";
 import { playMenuClick } from "./audio";
+import { formatTime } from "./raceTimer";
 import type { VisualTheme } from "./retro";
 
 export interface RacerDisplay {
@@ -158,6 +159,21 @@ function colorToCss(color: number): string {
   return `#${color.toString(16).padStart(6, "0")}`;
 }
 
+/**
+ * Preto ou branco, o que ler melhor por cima da cor dada.
+ *
+ * As cores de carro vão do preto (#1a1a1a) ao branco (#e8e8e8), então nenhuma cor de texto fixa
+ * serve pros dois: a etiqueta "P1" branca em cima do carro branco sumia por completo. A conta é a
+ * luminância relativa aproximada (os pesos vêm da sensibilidade do olho a cada canal).
+ */
+function contrastText(color: number): string {
+  const r = (color >> 16) & 0xff;
+  const g = (color >> 8) & 0xff;
+  const b = color & 0xff;
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.6 ? "#111" : "#fff";
+}
+
 /** Painel estilo SNES: fundo escuro, borda branca grossa e "sombra" preta deslocada (sem blur, pixelado). */
 function retroPanelStyle(extra = ""): string {
   return `
@@ -191,10 +207,10 @@ dashStyleTag.textContent = `
 document.head.appendChild(dashStyleTag);
 
 /** Velocímetro estilo LCD vermelho com barra de tacômetro diagonal, tipo painel de corrida SNES. */
-export function createSpeedHud(maxSpeedKmh: number) {
+export function createSpeedHud(maxSpeedKmh: number, parent: HTMLElement) {
   const el = document.createElement("div");
   el.style.cssText = `
-    position: fixed; top: 16px; right: 16px; z-index: 10; pointer-events: none;
+    position: absolute; top: 16px; right: 16px; z-index: 10; pointer-events: none;
     display: flex; flex-direction: column; align-items: flex-end;
   `;
 
@@ -232,9 +248,12 @@ export function createSpeedHud(maxSpeedKmh: number) {
   timer.style.cssText = "font-size: 18px; color: #fff; margin-top: 8px; letter-spacing: 1px;";
   panel.appendChild(timer);
 
-  document.body.appendChild(el);
+  parent.appendChild(el);
 
   return {
+    destroy() {
+      el.remove();
+    },
     update(speedKmh: number, timeText: string) {
       const v = Math.max(0, Math.round(speedKmh));
       value.textContent = String(v).padStart(3, "0");
@@ -255,13 +274,13 @@ export function createSpeedHud(maxSpeedKmh: number) {
  * O ponteiro de combustível fica DENTRO da barra em vez de ao lado dela, pra não brigar por espaço
  * com o leaderboard no celular.
  */
-export function createDashHud(mobile = false) {
+export function createDashHud(parent: HTMLElement, mobile = false) {
   const escala = mobile ? 0.78 : 1;
 
   // ---- marcha + nitro, canto inferior esquerdo ----
   const canto = document.createElement("div");
   canto.style.cssText = `
-    position: fixed; left: 16px; bottom: 16px; z-index: 10; pointer-events: none;
+    position: absolute; left: 16px; bottom: 16px; z-index: 10; pointer-events: none;
     display: flex; flex-direction: column; gap: ${6 * escala}px; align-items: flex-start;
   `;
 
@@ -276,7 +295,7 @@ export function createDashHud(mobile = false) {
     font-size: ${18 * escala}px; color: #fff; letter-spacing: 2px; padding: ${5 * escala}px ${10 * escala}px;
   `);
   canto.appendChild(marcha);
-  document.body.appendChild(canto);
+  parent.appendChild(canto);
 
   // ---- combustível, barra vertical na direita ----
   // Ancorado por BAIXO, e não centralizado na vertical: o leaderboard também mora na direita e
@@ -285,7 +304,7 @@ export function createDashHud(mobile = false) {
   const alturaBarra = (mobile ? 110 : 150) * escala;
   const fuelWrap = document.createElement("div");
   fuelWrap.style.cssText = `
-    position: fixed; right: 16px; bottom: ${(mobile ? 104 : 96) * escala}px;
+    position: absolute; right: 16px; bottom: ${(mobile ? 104 : 96) * escala}px;
     z-index: 10; pointer-events: none; display: flex; flex-direction: column;
     align-items: center; gap: 3px;
     font-family: ${RETRO_FONT}; font-weight: 700; font-size: ${11 * escala}px; color: #fff;
@@ -317,11 +336,15 @@ export function createDashHud(mobile = false) {
   const baseE = document.createElement("div");
   baseE.textContent = "E";
   fuelWrap.appendChild(baseE);
-  document.body.appendChild(fuelWrap);
+  parent.appendChild(fuelWrap);
 
   let piscando = false;
 
   return {
+    destroy() {
+      canto.remove();
+      fuelWrap.remove();
+    },
     /**
      * @param gear marcha atual (0 = ré, senão 1..6)
      * @param nitroCharges cargas de nitro sobrando
@@ -359,16 +382,19 @@ export function createDashHud(mobile = false) {
   };
 }
 
-export function createLapHud() {
+export function createLapHud(parent: HTMLElement) {
   const el = document.createElement("div");
   el.style.cssText = retroPanelStyle(`
-    position: fixed; top: 108px; left: 16px;
+    position: absolute; top: 108px; left: 16px;
     pointer-events: none; z-index: 10; font-size: 15px; line-height: 1.7;
     min-width: 150px;
   `);
-  document.body.appendChild(el);
+  parent.appendChild(el);
 
   return {
+    destroy() {
+      el.remove();
+    },
     update(
       lapCount: number,
       totalLaps: number,
@@ -389,7 +415,7 @@ export function createLapHud() {
 }
 
 /** Minimapa da pista (contorno visto de cima) com um ponto móvel por carro, tipo painel SNES. */
-export function createMinimap(waypoints: { x: number; z: number }[]) {
+export function createMinimap(waypoints: { x: number; z: number }[], parent: HTMLElement) {
   const width = 116;
   const height = 80;
   const pad = 10;
@@ -417,7 +443,7 @@ export function createMinimap(waypoints: { x: number; z: number }[]) {
 
   const container = document.createElement("div");
   container.style.cssText = retroPanelStyle(`
-    position: fixed; top: 16px; left: 16px; z-index: 10; pointer-events: none; padding: 6px;
+    position: absolute; top: 16px; left: 16px; z-index: 10; pointer-events: none; padding: 6px;
   `);
 
   const svgNS = "http://www.w3.org/2000/svg";
@@ -445,11 +471,14 @@ export function createMinimap(waypoints: { x: number; z: number }[]) {
   svg.appendChild(dotsGroup);
 
   container.appendChild(svg);
-  document.body.appendChild(container);
+  parent.appendChild(container);
 
   const dots = new Map<string, SVGCircleElement>();
 
   return {
+    destroy() {
+      container.remove();
+    },
     update(cars: { id: string; x: number; z: number; color: number; isPlayer: boolean }[]) {
       for (const car of cars) {
         let dot = dots.get(car.id);
@@ -471,23 +500,26 @@ export function createMinimap(waypoints: { x: number; z: number }[]) {
 }
 
 /** Indicador grande de colocação (tipo "1ST"), canto inferior direito. */
-export function createPositionBadge(mobile = false) {
+export function createPositionBadge(parent: HTMLElement, mobile = false) {
   const el = document.createElement("div");
   el.style.cssText = mobile
     ? `
-    position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 10;
+    position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 10;
     pointer-events: none;
     font-family: ${RETRO_FONT}; font-weight: 700; font-style: italic; font-size: 34px;
     color: #fff; text-shadow: 2px 2px 0 #000, -1px -1px 0 #ff3b3b; letter-spacing: 1px;
   `
     : `
-    position: fixed; bottom: 20px; right: 20px; z-index: 10; pointer-events: none;
+    position: absolute; bottom: 20px; right: 20px; z-index: 10; pointer-events: none;
     font-family: ${RETRO_FONT}; font-weight: 700; font-style: italic; font-size: 58px;
     color: #fff; text-shadow: 3px 3px 0 #000, -2px -2px 0 #ff3b3b; letter-spacing: 1px;
   `;
-  document.body.appendChild(el);
+  parent.appendChild(el);
 
   return {
+    destroy() {
+      el.remove();
+    },
     update(position: number) {
       const suffixes = ["ST", "ND", "RD"];
       const suffix = position <= 3 ? suffixes[position - 1] : "TH";
@@ -496,17 +528,20 @@ export function createPositionBadge(mobile = false) {
   };
 }
 
-export function createLeaderboardHud(hidden = false) {
+export function createLeaderboardHud(parent: HTMLElement, hidden = false) {
   const el = document.createElement("div");
   el.style.cssText = retroPanelStyle(`
-    position: fixed; top: 168px; right: 16px;
+    position: absolute; top: 168px; right: 16px;
     pointer-events: none; z-index: 10; font-size: 14px;
     min-width: 170px;
     ${hidden ? "display: none;" : ""}
   `);
-  document.body.appendChild(el);
+  parent.appendChild(el);
 
   return {
+    destroy() {
+      el.remove();
+    },
     update(racers: RacerDisplay[]) {
       const sorted = [...racers].sort((a, b) => b.score - a.score);
       el.innerHTML = sorted
@@ -525,10 +560,10 @@ export function createLeaderboardHud(hidden = false) {
   };
 }
 
-export function createLapBanner() {
+export function createLapBanner(parent: HTMLElement) {
   const el = document.createElement("div");
   el.style.cssText = `
-    position: fixed; top: 38%; left: 50%; transform: translate(-50%, -50%);
+    position: absolute; top: 38%; left: 50%; transform: translate(-50%, -50%);
     z-index: 15; opacity: 0; transition: opacity 0.4s ease; pointer-events: none;
   `;
 
@@ -540,11 +575,15 @@ export function createLapBanner() {
     font-size: clamp(18px, 5.5vw, 42px); padding: clamp(6px, 1.5vw, 10px) clamp(14px, 4vw, 28px);
   `;
   el.appendChild(inner);
-  document.body.appendChild(el);
+  parent.appendChild(el);
 
   let hideTimeout: number | undefined;
 
   return {
+    destroy() {
+      window.clearTimeout(hideTimeout);
+      el.remove();
+    },
     show(text: string) {
       inner.textContent = text;
       el.style.opacity = "1";
@@ -552,6 +591,154 @@ export function createLapBanner() {
       hideTimeout = window.setTimeout(() => {
         el.style.opacity = "0";
       }, 1800);
+    },
+  };
+}
+
+export interface MinimapDot {
+  id: string;
+  x: number;
+  z: number;
+  color: number;
+  isPlayer: boolean;
+}
+
+/** Tudo que o HUD de um jogador mostra num frame. */
+export interface PlayerHudData {
+  speedKmh: number;
+  lapTimeText: string;
+  gear: number;
+  nitroCharges: number;
+  nitroActive: boolean;
+  /** 0..1 */
+  fuel: number;
+  lapCount: number;
+  totalLaps: number;
+  lastLapMs: number | null;
+  bestLapMs: number | null;
+  position: number;
+  racers: RacerDisplay[];
+  dots: MinimapDot[];
+}
+
+export interface PlayerHudOptions {
+  maxSpeedKmh: number;
+  waypoints: { x: number; z: number }[];
+  /** etiqueta "P1"/"P2" na cor do carro — só aparece quando a tela é dividida */
+  tag?: string;
+  tagColor?: number;
+  /** 1 = tela cheia. Na tela dividida tudo encolhe junto (ver o porquê do transform abaixo). */
+  scale?: number;
+  mobile?: boolean;
+}
+
+export interface PlayerHud {
+  update(data: PlayerHudData): void;
+  /** mensagem no meio DESTA metade (volta nova, fora da pista...) */
+  banner(text: string): void;
+  /** painel de chegada, fixo, nesta metade */
+  showFinish(place: number): void;
+  destroy(): void;
+}
+
+/**
+ * O HUD de UM jogador, dentro do pedaço de tela dele.
+ *
+ * Por que isto existe: antes cada widget se pregava no `body` com `position: fixed` e coordenadas
+ * cravadas, ou seja, existia exatamente um HUD possível na tela. Agora cada jogador tem o seu
+ * container e os mesmos widgets se repetem dentro dele, com as MESMAS coordenadas — o que muda é
+ * o container.
+ *
+ * O encolhimento é um `transform: scale()` num container que é 1/escala maior que a metade da
+ * tela, em vez de recalcular tamanho de fonte e padding de cada widget. Além de ser bem menos
+ * código, isso preserva as proporções do painel inteiro (que é pixel art: meio pixel de borda
+ * estraga o visual).
+ */
+export function createPlayerHud(host: HTMLElement, opts: PlayerHudOptions): PlayerHud {
+  const scale = opts.scale ?? 1;
+
+  const inner = document.createElement("div");
+  inner.style.cssText = `
+    position: absolute; left: 0; top: 0;
+    width: ${100 / scale}%; height: ${100 / scale}%;
+    transform: scale(${scale}); transform-origin: top left;
+    pointer-events: none;
+  `;
+  host.appendChild(inner);
+
+  const speed = createSpeedHud(opts.maxSpeedKmh, inner);
+  const dash = createDashHud(inner, opts.mobile);
+  const lap = createLapHud(inner);
+  const leaderboard = createLeaderboardHud(inner, opts.mobile);
+  const minimap = createMinimap(opts.waypoints, inner);
+  const badge = createPositionBadge(inner, opts.mobile);
+  const lapBanner = createLapBanner(inner);
+
+  if (opts.tag) {
+    const tag = document.createElement("div");
+    tag.textContent = opts.tag;
+    const tagColor = opts.tagColor ?? 0x14142b;
+    tag.style.cssText = retroPanelStyle(`
+      position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+      font-size: 18px; padding: 4px 14px;
+      background: ${colorToCss(tagColor)}; color: ${contrastText(tagColor)};
+    `);
+    inner.appendChild(tag);
+  }
+
+  const finish = document.createElement("div");
+  finish.style.cssText = `
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    display: none; flex-direction: column; align-items: center; gap: 6px;
+    font-family: ${RETRO_FONT}; font-weight: 700; text-transform: uppercase;
+    background: #14142b; border: 4px solid #fff; box-shadow: 6px 6px 0 #000;
+    padding: 14px 32px; text-align: center;
+  `;
+  const finishTitle = document.createElement("div");
+  finishTitle.textContent = "Finish";
+  finishTitle.style.cssText = "font-size: 40px; color: #ffe14d; letter-spacing: 3px;";
+  const finishPlace = document.createElement("div");
+  finishPlace.style.cssText = "font-size: 24px; color: #fff; letter-spacing: 2px;";
+  finish.appendChild(finishTitle);
+  finish.appendChild(finishPlace);
+  inner.appendChild(finish);
+
+  // O leaderboard reescreve o HTML inteiro a cada chamada, e com a tela dividida isso aconteceria
+  // 2× por frame. Como ele só muda quando alguém ultrapassa, 6 atualizações por segundo são
+  // indistinguíveis de 60 e economizam um bom tanto de trabalho de layout do navegador.
+  const LEADERBOARD_INTERVAL_MS = 160;
+  let lastLeaderboard = 0;
+
+  return {
+    update(data) {
+      speed.update(data.speedKmh, data.lapTimeText);
+      dash.update(data.gear, data.nitroCharges, data.nitroActive, data.fuel);
+      lap.update(data.lapCount, data.totalLaps, data.lastLapMs, data.bestLapMs, formatTime);
+      badge.update(data.position);
+      minimap.update(data.dots);
+
+      const now = performance.now();
+      if (now - lastLeaderboard >= LEADERBOARD_INTERVAL_MS) {
+        lastLeaderboard = now;
+        leaderboard.update(data.racers);
+      }
+    },
+    banner(text) {
+      lapBanner.show(text);
+    },
+    showFinish(place) {
+      finishPlace.textContent = `${ordinal(place)} lugar`;
+      finish.style.display = "flex";
+    },
+    destroy() {
+      speed.destroy();
+      dash.destroy();
+      lap.destroy();
+      leaderboard.destroy();
+      minimap.destroy();
+      badge.destroy();
+      lapBanner.destroy();
+      inner.remove();
     },
   };
 }
@@ -581,6 +768,10 @@ export function createCountdownOverlay() {
   let pendingStep: number | undefined;
 
   return {
+    destroy() {
+      window.clearTimeout(pendingStep);
+      el.remove();
+    },
     start(onDone: () => void) {
       // o fim da sequência esconde o overlay com display:none — sem restaurar aqui, a segunda
       // corrida numa mesma sala (o "reiniciar" do multiplayer, que NÃO recarrega a página)
@@ -686,6 +877,9 @@ export function createVictoryOverlay(onRestart: () => void) {
     hide() {
       el.style.display = "none";
     },
+    destroy() {
+      el.remove();
+    },
   };
 }
 
@@ -762,7 +956,9 @@ export function createLoadingScreen() {
 }
 
 /** Tela pra escolher entre correr sozinho contra bots ou entrar numa sala online. */
-export function createModeSelectScreen(onSelect: (mode: "solo" | "online") => void): MenuScreen {
+export function createModeSelectScreen(
+  onSelect: (mode: "solo" | "local" | "online") => void
+): MenuScreen {
   const el = document.createElement("div");
   el.style.cssText = `
     position: fixed; inset: 0; background: ${MENU.fundo};
@@ -784,8 +980,19 @@ export function createModeSelectScreen(onSelect: (mode: "solo" | "online") => vo
   list.style.cssText = "display: flex; flex-direction: column; gap: 16px;";
   el.appendChild(list);
 
-  const options: { mode: "solo" | "online"; label: string; color: string; hover: string }[] = [
+  const options: {
+    mode: "solo" | "local" | "online";
+    label: string;
+    color: string;
+    hover: string;
+  }[] = [
     { mode: "solo", label: "Solo (contra bots)", color: MENU.vermelho, hover: MENU.vermelhoHover },
+    {
+      mode: "local",
+      label: "Local (2 jogadores)",
+      color: MENU.grafite,
+      hover: MENU.grafiteHover,
+    },
     { mode: "online", label: "Sala Online (amigos)", color: MENU.grafite, hover: MENU.grafiteHover },
   ];
 
@@ -1627,4 +1834,402 @@ export function createMobileControls(onChange: (state: MobileControlState) => vo
   wrapper.appendChild(rightPanel);
   document.body.appendChild(container);
   return { destroy: () => container.remove() };
+}
+
+/** Botão pequeno de opção (as "fichas" das linhas do setup local). */
+function createChip(label: string, onClick: () => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.textContent = label;
+  button.style.cssText = `
+    font-family: ${RETRO_FONT}; font-size: 13px; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; padding: 8px 14px; border: 3px solid #fff;
+    background: ${MENU.grafite}; color: ${MENU.apagado};
+    box-shadow: 3px 3px 0 #000; cursor: pointer;
+  `;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function paintChip(button: HTMLButtonElement, active: boolean) {
+  button.style.background = active ? MENU.vermelho : MENU.grafite;
+  button.style.color = active ? "#fff" : MENU.apagado;
+}
+
+/** Linha do setup: um rótulo à esquerda e os controles à direita. */
+function createSetupRow(labelText: string): { row: HTMLDivElement; content: HTMLDivElement } {
+  const row = document.createElement("div");
+  row.style.cssText = `
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    justify-content: center; margin-bottom: 14px;
+  `;
+
+  const label = document.createElement("div");
+  label.textContent = labelText;
+  label.style.cssText = `
+    font-size: 13px; letter-spacing: 2px; color: ${MENU.prata}; text-transform: uppercase;
+    min-width: 108px; text-align: right;
+  `;
+  row.appendChild(label);
+
+  const content = document.createElement("div");
+  content.style.cssText = "display: flex; align-items: center; gap: 8px; flex-wrap: wrap;";
+  row.appendChild(content);
+
+  return { row, content };
+}
+
+export type SplitLayoutChoice = "horizontal" | "vertical";
+
+export interface LocalSetupResult {
+  p1CarId: string;
+  p2CarId: string;
+  mapId: string;
+  bots: number;
+  layout: SplitLayoutChoice;
+}
+
+/**
+ * Setup do modo local: carro de cada jogador, bots, pista e orientação da divisão.
+ *
+ * Uma tela só, em vez do fluxo de várias telas do solo/online: aqui são seis escolhas pequenas e
+ * duas pessoas decidindo juntas na frente do mesmo monitor — empilhar seis telas seria pior.
+ *
+ * Cor repetida: clicar numa cor que o outro jogador já tem TROCA as duas. É melhor que bloquear
+ * (ninguém fica clicando sem entender por que não acontece nada) e garante que P1 e P2 nunca
+ * ficam iguais.
+ */
+export function createLocalSetupScreen(
+  cars: CarOption[],
+  maps: MapOption[],
+  maxBots: number,
+  onStart: (result: LocalSetupResult) => void,
+  onBack?: () => void
+): MenuScreen {
+  const el = document.createElement("div");
+  el.style.cssText = `
+    position: fixed; inset: 0; background: ${MENU.fundo};
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 30; font-family: ${RETRO_FONT}; color: #fff; text-align: center;
+    padding: 20px; box-sizing: border-box; overflow: auto;
+  `;
+
+  const title = document.createElement("div");
+  title.style.cssText = `
+    font-size: 28px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
+    color: ${MENU.branco}; text-shadow: 3px 3px 0 #000; margin-bottom: 24px;
+  `;
+  title.textContent = "Local — 2 Jogadores";
+  el.appendChild(title);
+
+  const choice: LocalSetupResult = {
+    p1CarId: cars[0].id,
+    p2CarId: (cars[1] ?? cars[0]).id,
+    mapId: maps[0].id,
+    bots: Math.min(4, maxBots),
+    layout: "horizontal",
+  };
+
+  // ---- cor de cada jogador ----
+  const carButtons: { p1: HTMLButtonElement[]; p2: HTMLButtonElement[] } = { p1: [], p2: [] };
+
+  function paintCars() {
+    cars.forEach((car, i) => {
+      paintChip(carButtons.p1[i], car.id === choice.p1CarId);
+      paintChip(carButtons.p2[i], car.id === choice.p2CarId);
+    });
+  }
+
+  (["p1", "p2"] as const).forEach((who) => {
+    const { row, content } = createSetupRow(who === "p1" ? "Jogador 1" : "Jogador 2");
+    for (const car of cars) {
+      const button = createChip("", () => {
+        const mine = who === "p1" ? choice.p1CarId : choice.p2CarId;
+        const other = who === "p1" ? choice.p2CarId : choice.p1CarId;
+        if (car.id === other) {
+          // troca: o outro jogador fica com a cor que era minha
+          if (who === "p1") choice.p2CarId = mine;
+          else choice.p1CarId = mine;
+        }
+        if (who === "p1") choice.p1CarId = car.id;
+        else choice.p2CarId = car.id;
+        paintCars();
+      });
+      button.style.padding = "6px 10px";
+      button.title = car.name;
+
+      const swatch = document.createElement("div");
+      swatch.style.cssText = `
+        width: 34px; height: 18px; background: ${colorToCss(car.color)};
+        border: 2px solid #fff;
+      `;
+      button.appendChild(swatch);
+
+      carButtons[who].push(button);
+      content.appendChild(button);
+    }
+    el.appendChild(row);
+  });
+  paintCars();
+
+  // ---- bots ----
+  {
+    const { row, content } = createSetupRow("Bots");
+    const value = document.createElement("div");
+    value.style.cssText = `font-size: 20px; min-width: 42px; color: #fff;`;
+
+    function paintBots() {
+      value.textContent = String(choice.bots);
+    }
+
+    const minus = createChip("-", () => {
+      choice.bots = Math.max(0, choice.bots - 1);
+      paintBots();
+    });
+    const plus = createChip("+", () => {
+      choice.bots = Math.min(maxBots, choice.bots + 1);
+      paintBots();
+    });
+    paintChip(minus, false);
+    paintChip(plus, false);
+    paintBots();
+
+    content.appendChild(minus);
+    content.appendChild(value);
+    content.appendChild(plus);
+
+    const hint = document.createElement("div");
+    hint.style.cssText = `font-size: 11px; color: ${MENU.apagado}; letter-spacing: 1px;`;
+    hint.textContent = `máx. ${maxBots}`;
+    content.appendChild(hint);
+
+    el.appendChild(row);
+  }
+
+  // ---- pista ----
+  {
+    const { row, content } = createSetupRow("Pista");
+    const buttons: HTMLButtonElement[] = [];
+    function paintMaps() {
+      maps.forEach((map, i) => paintChip(buttons[i], map.id === choice.mapId));
+    }
+    for (const map of maps) {
+      const button = createChip(map.name, () => {
+        choice.mapId = map.id;
+        paintMaps();
+      });
+      buttons.push(button);
+      content.appendChild(button);
+    }
+    paintMaps();
+    el.appendChild(row);
+  }
+
+  // ---- divisão da tela ----
+  {
+    const { row, content } = createSetupRow("Divisão");
+    const options: { id: SplitLayoutChoice; label: string }[] = [
+      { id: "horizontal", label: "Cima / Baixo" },
+      { id: "vertical", label: "Lado a Lado" },
+    ];
+    const buttons: HTMLButtonElement[] = [];
+    function paintLayout() {
+      options.forEach((opt, i) => paintChip(buttons[i], opt.id === choice.layout));
+    }
+    for (const opt of options) {
+      const button = createChip(opt.label, () => {
+        choice.layout = opt.id;
+        paintLayout();
+      });
+      buttons.push(button);
+      content.appendChild(button);
+    }
+    paintLayout();
+    el.appendChild(row);
+  }
+
+  // ---- lembrete dos controles ----
+  const controls = document.createElement("div");
+  controls.style.cssText = `
+    margin-top: 10px; font-size: 11.5px; line-height: 1.8; letter-spacing: 1px;
+    color: ${MENU.apagado};
+  `;
+  controls.innerHTML = `
+    <div><span style="color:${MENU.prata};">P1</span> &nbsp;W A S D &nbsp;·&nbsp; turbo: shift esquerdo / espaço</div>
+    <div><span style="color:${MENU.prata};">P2</span> &nbsp;setas &nbsp;·&nbsp; turbo: shift direito / enter</div>
+    <div>pausa: esc ou P &nbsp;·&nbsp; controle de videogame também funciona</div>
+  `;
+  el.appendChild(controls);
+
+  const start = document.createElement("button");
+  start.textContent = "Largar";
+  start.style.cssText = `
+    font-family: ${RETRO_FONT}; font-size: 20px; font-weight: 700; letter-spacing: 2px;
+    text-transform: uppercase; padding: 14px 44px; margin-top: 24px;
+    background: ${MENU.vermelho}; color: #fff; border: 3px solid #fff;
+    box-shadow: 4px 4px 0 #000; cursor: pointer;
+  `;
+  start.addEventListener("mouseenter", () => {
+    start.style.background = MENU.vermelhoHover;
+  });
+  start.addEventListener("mouseleave", () => {
+    start.style.background = MENU.vermelho;
+  });
+  start.addEventListener("click", () => {
+    el.style.display = "none";
+    onStart({ ...choice });
+  });
+  el.appendChild(start);
+
+  if (onBack) el.appendChild(createBackButton(onBack));
+  document.body.appendChild(comSomDeMenu(el));
+  return menuScreenHandle(el, onBack);
+}
+
+export interface StandingRow {
+  label: string;
+  color: number;
+  place: number;
+  lapCount: number;
+  totalTimeMs: number | null;
+  bestLapMs: number | null;
+  /** "P1"/"P2" quando é um jogador humano local — é o que destaca a linha */
+  tag?: string;
+}
+
+/**
+ * Classificação final da corrida local, com Revanche e Menu.
+ *
+ * É uma tela separada do `victoryOverlay` (que anuncia UM vencedor) porque no local o que importa
+ * é a tabela: quem chegou em que lugar, em quanto tempo, e como os dois humanos se saíram.
+ */
+export function createResultsScreen(
+  rows: StandingRow[],
+  onRematch: () => void,
+  onMenu: () => void
+): MenuScreen {
+  const el = document.createElement("div");
+  el.style.cssText = `
+    position: fixed; inset: 0; background: rgba(10, 10, 20, 0.92);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 40; font-family: ${RETRO_FONT}; color: #fff; text-align: center;
+    padding: 20px; box-sizing: border-box; overflow: auto;
+  `;
+
+  const checkerBar = document.createElement("div");
+  checkerBar.style.cssText = `
+    width: 320px; height: 20px; margin-bottom: 18px;
+    background-image: repeating-conic-gradient(#fff 0% 25%, #111 0% 50%);
+    background-size: 20px 20px; border: 3px solid #fff;
+  `;
+  el.appendChild(checkerBar);
+
+  const title = document.createElement("div");
+  title.style.cssText = `
+    font-size: 34px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
+    color: #ffe14d; text-shadow: 3px 3px 0 #000; margin-bottom: 22px;
+  `;
+  title.textContent = "Classificação";
+  el.appendChild(title);
+
+  const table = document.createElement("div");
+  table.style.cssText = `
+    ${retroPanelStyle("")}
+    display: flex; flex-direction: column; gap: 4px; min-width: min(460px, 90vw);
+    font-size: 14px; color: #fff; text-align: left;
+  `;
+  table.innerHTML = [...rows]
+    .sort((a, b) => a.place - b.place)
+    .map((row) => {
+      const swatch = `<span style="display:inline-block;width:12px;height:12px;background:${colorToCss(
+        row.color
+      )};border:2px solid #fff;vertical-align:middle;margin-right:8px;"></span>`;
+      const tag = row.tag
+        ? `<span style="color:#ff3b3b;margin-right:6px;">${row.tag}</span>`
+        : "";
+      const total = row.totalTimeMs !== null ? formatTime(row.totalTimeMs) : "não terminou";
+      const best = row.bestLapMs !== null ? formatTime(row.bestLapMs) : `--'--"--`;
+      const bg = row.tag ? "background:#3a1f1f;" : "";
+      return `<div style="display:flex;align-items:center;gap:8px;${bg}padding:4px 6px;">
+        <span style="color:#ffe14d;min-width:34px;">${ordinal(row.place)}</span>
+        <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${swatch}${tag}${row.label}</span>
+        <span style="color:#8ecbff;min-width:88px;text-align:right;">${total}</span>
+        <span style="color:#8effa0;min-width:88px;text-align:right;">${best}</span>
+      </div>`;
+    })
+    .join("");
+  el.appendChild(table);
+
+  const legend = document.createElement("div");
+  legend.style.cssText = `
+    font-size: 10.5px; letter-spacing: 1px; color: ${MENU.apagado}; margin-top: 8px;
+  `;
+  legend.textContent = "tempo total · melhor volta";
+  el.appendChild(legend);
+
+  const buttons = document.createElement("div");
+  buttons.style.cssText = "display: flex; gap: 14px; margin-top: 26px; flex-wrap: wrap; justify-content: center;";
+  el.appendChild(buttons);
+
+  const actions: { label: string; color: string; hover: string; onClick: () => void }[] = [
+    { label: "Revanche", color: MENU.vermelho, hover: MENU.vermelhoHover, onClick: onRematch },
+    { label: "Menu", color: MENU.grafite, hover: MENU.grafiteHover, onClick: onMenu },
+  ];
+  for (const action of actions) {
+    const button = document.createElement("button");
+    button.textContent = action.label;
+    button.style.cssText = `
+      font-family: ${RETRO_FONT}; font-size: 18px; font-weight: 700; letter-spacing: 2px;
+      text-transform: uppercase; padding: 12px 32px;
+      background: ${action.color}; color: #fff; border: 3px solid #fff;
+      box-shadow: 4px 4px 0 #000; cursor: pointer;
+    `;
+    button.addEventListener("mouseenter", () => {
+      button.style.background = action.hover;
+    });
+    button.addEventListener("mouseleave", () => {
+      button.style.background = action.color;
+    });
+    button.addEventListener("click", action.onClick);
+    buttons.appendChild(button);
+  }
+
+  document.body.appendChild(comSomDeMenu(el));
+  return menuScreenHandle(el);
+}
+
+/** Pausa: congela a corrida pros dois jogadores e diz como voltar. */
+export function createPauseOverlay() {
+  const el = document.createElement("div");
+  el.style.cssText = `
+    position: fixed; inset: 0; background: rgba(8, 8, 16, 0.72);
+    display: none; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 26; font-family: ${RETRO_FONT}; color: #fff; text-align: center; gap: 14px;
+    pointer-events: none;
+  `;
+
+  const box = document.createElement("div");
+  box.style.cssText = retroPanelStyle(`
+    font-size: 44px; letter-spacing: 6px; color: #fff; padding: 14px 40px;
+  `);
+  box.textContent = "Pausa";
+  el.appendChild(box);
+
+  const hint = document.createElement("div");
+  hint.style.cssText = `font-size: 12px; letter-spacing: 2px; color: ${MENU.prata};`;
+  hint.textContent = "Esc ou P pra continuar";
+  el.appendChild(hint);
+
+  document.body.appendChild(el);
+
+  return {
+    show() {
+      el.style.display = "flex";
+    },
+    hide() {
+      el.style.display = "none";
+    },
+    destroy() {
+      el.remove();
+    },
+  };
 }

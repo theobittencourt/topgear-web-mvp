@@ -13,6 +13,12 @@ export class RaceProgress {
   bestLapTime: number | null = null;
   finished = false;
 
+  /** colocação na chegada (1 = primeiro), ou null enquanto não terminou */
+  finishPlace: number | null = null;
+  /** tempo total da corrida, em ms, fechado na chegada */
+  totalTime: number | null = null;
+  private raceStartTime = performance.now();
+
   constructor(waypoints: THREE.Vector3[], spawnIndex: number, finishIndex: number) {
     this.waypoints = waypoints;
     this.nextIndex = (spawnIndex + 1) % waypoints.length;
@@ -48,6 +54,20 @@ export class RaceProgress {
 
   resetLapClock() {
     this.lapStartTime = performance.now();
+    this.raceStartTime = this.lapStartTime;
+  }
+
+  /**
+   * Marca a chegada deste carro.
+   *
+   * Cada carro termina por conta própria: no modo local a corrida continua depois do primeiro
+   * jogador cruzar a linha, então "terminou" não pode mais ser uma coisa só da corrida inteira.
+   */
+  finish(place: number) {
+    if (this.finished) return;
+    this.finished = true;
+    this.finishPlace = place;
+    this.totalTime = performance.now() - this.raceStartTime;
   }
 
   currentLapElapsed(): number {

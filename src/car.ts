@@ -1,8 +1,7 @@
 import * as THREE from "three";
 import { elevationAt } from "./track";
-import { stepCar, normalizeAngle, MAX_SPEED } from "@shared/physics";
+import { stepCar, MAX_SPEED } from "@shared/physics";
 import type { DriveInput } from "@shared/physics";
-import { BOT_WAYPOINT_RADIUS } from "@shared/rules";
 
 export function createCarMesh(bodyColor: number = 0xe8e8e8): THREE.Group {
   const group = new THREE.Group();
@@ -123,14 +122,20 @@ export class CarController {
 
   readonly maxSpeed = MAX_SPEED;
 
-  protected waypoints?: THREE.Vector3[];
+  /**
+   * Teto de velocidade deste carro, ou `null` pra usar o da física.
+   *
+   * Existe pros bots: cada um tem uma velocidade de cruzeiro própria (é o que dá um pelotão em vez
+   * de um trem andando junto). Fica no carro, e não na IA, pra que o teto valha dentro do passo de
+   * física em vez de ser um ajuste aplicado por fora depois — quem define é o `BotInput`.
+   */
+  speedCap: number | null = null;
 
   /** objeto reaproveitado pra não alocar um por carro por frame só pra chamar o `stepCar` */
   private kinematics = { x: 0, z: 0, heading: 0, speed: 0 };
 
-  constructor(mesh: THREE.Group, waypoints?: THREE.Vector3[]) {
+  constructor(mesh: THREE.Group) {
     this.mesh = mesh;
-    this.waypoints = waypoints;
   }
 
   update(dt: number, input: DriveInput) {
@@ -146,6 +151,7 @@ export class CarController {
 
     this.heading = k.heading;
     this.speed = k.speed;
+    if (this.speedCap !== null && this.speed > this.speedCap) this.speed = this.speedCap;
     // o empurrão de colisão é local do client (o servidor ainda não simula colisão), então entra
     // por fora do passo de física compartilhado
     this.mesh.position.x = k.x + this.bumpVelocity.x * dt;
@@ -160,64 +166,5 @@ export class CarController {
     // o empurrão de colisão decai rápido, tipo bumper car
     const decayFactor = Math.pow(0.02, dt);
     this.bumpVelocity.multiplyScalar(decayFactor);
-  }
-}
-
-export class AICarController extends CarController {
-  private targetIndex: number;
-  readonly cruiseThrottle: number;
-
-  private stuckTimer = 0;
-  private reverseTimer = 0;
-  private lastReverseSteer = 0;
-
-  constructor(mesh: THREE.Group, waypoints: THREE.Vector3[], startIndex: number, cruiseThrottle = 0.85) {
-    super(mesh, waypoints);
-    this.waypoints = waypoints;
-    this.targetIndex = startIndex;
-    this.cruiseThrottle = cruiseThrottle;
-  }
-
-  updateAI(dt: number) {
-    const target = this.waypoints![this.targetIndex];
-    const dx = target.x - this.mesh.position.x;
-    const dz = target.z - this.mesh.position.z;
-    const distance = Math.hypot(dx, dz);
-
-    if (distance < BOT_WAYPOINT_RADIUS) {
-      this.targetIndex = (this.targetIndex + 1) % this.waypoints!.length;
-    }
-
-    const desiredHeading = Math.atan2(dx, dz);
-    const angleDiff = normalizeAngle(desiredHeading - this.heading);
-    const steer = THREE.MathUtils.clamp(-angleDiff * 2, -1, 1);
-    const sharpTurn = Math.abs(angleDiff) > 0.5;
-
-    // se está travado (colidiu com carro/obstáculo e não sai do lugar), engata a ré
-    if (this.reverseTimer > 0) {
-      this.reverseTimer -= dt;
-      this.update(dt, { throttle: 0, brake: 1, steer: this.lastReverseSteer });
-      return;
-    }
-
-    this.update(dt, {
-      throttle: sharpTurn ? this.cruiseThrottle * 0.65 : this.cruiseThrottle,
-      brake: 0,
-      steer,
-    });
-
-    const topSpeed = this.maxSpeed * (sharpTurn ? this.cruiseThrottle * 0.65 : this.cruiseThrottle);
-    if (this.speed > topSpeed) this.speed = topSpeed;
-
-    if (Math.abs(this.speed) < 2) {
-      this.stuckTimer += dt;
-      if (this.stuckTimer > 0.8) {
-        this.reverseTimer = 1 + Math.random() * 0.5;
-        this.lastReverseSteer = steer >= 0 ? -1 : 1;
-        this.stuckTimer = 0;
-      }
-    } else {
-      this.stuckTimer = 0;
-    }
   }
 }

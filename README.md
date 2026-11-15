@@ -1,7 +1,8 @@
 # Top Gear Test
 
 Jogo de corrida arcade em 3D inspirado no Top Gear do SNES, feito com TypeScript, Vite e Three.js.
-Tem modo solo contra bots e modo online com sala privada, servidor autoritativo em Colyseus.
+Tem modo solo contra bots, modo local em tela dividida pra dois no mesmo teclado, e modo online com
+sala privada, servidor autoritativo em Colyseus.
 
 ## O que tem
 
@@ -11,12 +12,17 @@ Tem modo solo contra bots e modo online com sala privada, servidor autoritativo 
 - dois temas visuais: **Retrô** (resolução interna baixa, pixel grandão, luz chapada) e **Moderno** (resolução cheia, com sombra)
 - 6 cores de carro pra escolher
 - **modo solo**: corrida de 3 voltas contra 9 bots
+- **modo local**: dois jogadores no mesmo teclado, em tela dividida (cima/baixo ou lado a lado),
+  contra até 8 bots, com HUD, câmera, mensagens e som de motor independentes por jogador
 - **modo online**: sala privada com código pra compartilhar, de 5 a 10 carros (jogadores e/ou bots), com o host controlando quem entra, quem sai e quando larga
 - física do carro idêntica no solo e no online (o mesmo código roda nos dois lados — ver [Código compartilhado](#código-compartilhado))
 - turbo com 3 cargas por corrida, funcionando igual no solo e no online
 - HUD estilo retrô SNES: velocímetro com tacômetro, minimapa, tempo de volta, melhor volta, leaderboard ao vivo, badge de posição, marcha, cargas de turbo e medidor de combustível
 - controles mobile por toque (acelerador/freio e joystick de direção)
-- contagem regressiva de largada, banner de volta e tela de vitória
+- contagem regressiva de largada, banner de volta, tela de vitória e classificação final no modo local
+- som de motor por jogador, sintetizado na hora (com panorâmica estéreo na divisão lado a lado) e
+  efeitos de batida e turbo
+- pausa (Esc ou P) nos modos offline
 - menus com identidade própria: logo, paleta tirada da arte, som de clique e navegação pra trás em todas as telas
 
 ## Como rodar localmente
@@ -73,15 +79,39 @@ cd server && npm run build && npm start   # servidor
 
 ### Desktop
 
+No solo e no online (as setas valem como alternativa ao WASD):
+
 | Tecla | Ação |
 | --- | --- |
-| W | acelerar |
-| S | frear / ré |
-| A | virar pra esquerda |
-| D | virar pra direita |
-| Espaço ou Shift | turbo (3 cargas por corrida) |
+| W ou ↑ | acelerar |
+| S ou ↓ | frear / ré |
+| A ou ← | virar pra esquerda |
+| D ou → | virar pra direita |
+| Espaço, Shift, Enter ou 0 do teclado numérico | turbo (3 cargas por corrida) |
+
+No modo local, cada jogador fica com metade do teclado:
+
+| Ação | Jogador 1 | Jogador 2 |
+| --- | --- | --- |
+| Acelerar | W | ↑ |
+| Frear / ré | S | ↓ |
+| Esquerda | A | ← |
+| Direita | D | → |
+| Turbo | Shift esquerdo ou Espaço | Shift direito, Enter ou 0 do numérico |
+| Pausa (vale pros dois) | Esc ou P | Esc ou P |
+
+As teclas são lidas por **posição física** (`KeyboardEvent.code`), então funcionam igual em ABNT2,
+QWERTY americano, AZERTY e afins. Os mapeamentos ficam todos em `KEYMAPS`, em `src/input.ts`.
+
+**Controle de videogame** também funciona: o controle 1 vai pro jogador 1 e o 2 pro jogador 2
+(A acelera, B freia, analógico esquerdo ou direcional esterça, X/Y/RB dão turbo). O teclado
+continua valendo ao mesmo tempo, sem precisar trocar de "modo".
 
 Nas telas de menu, **Esc** faz o mesmo que o botão "Voltar".
+
+> **Teclado com ghosting:** teclado de membrana barato costuma ignorar algumas combinações de 3+
+> teclas apertadas juntas (é limitação do hardware, não do jogo). Se W+A junto com ↑+→ falhar,
+> o jeito é usar um teclado com anti-ghosting/NKRO — ou um dos dois jogar no controle.
 
 ### Mobile
 
@@ -92,14 +122,20 @@ turbo (`N`) de um lado, joystick de direção do outro.
 
 ```
 src/                     client
-  main.ts                monta a cena, o fluxo de telas e os loops de jogo (solo e online)
+  main.ts                fluxo de telas e o loop do modo online
+  renderer.ts            o renderer/canvas únicos da sessão e o aviso de resize
+  input.ts               mapas de tecla, teclado, controle e a IA dos bots como fontes de input
+  race/offlineRace.ts    a corrida do solo e do local (1 ou 2 jogadores + bots)
+  race/scene.ts          cena 3D de uma corrida (luz, céu, pista, grid) com dispose
+  race/viewports.ts      câmera + pedaço de tela por jogador (tela cheia ou dividida)
   track.ts               malha 3D da pista, elevação, paleta e cenário instanciado
-  car.ts                 modelo do carro, controle do jogador e IA dos bots
+  car.ts                 modelo do carro e a física local do carro
   ui.ts                  HUD e todas as telas (DOM puro, sem framework)
   retro.ts               tema visual (retrô/moderno) e direção de arte
   sprites.ts             sprites 2D de beira de pista (vegetação e placas de curva)
   collision.ts           colisão entre carros tipo bumper car
-  raceTimer.ts           progresso/voltas no solo e cronômetro de volta no online
+  raceTimer.ts           progresso/voltas/chegada no offline e cronômetro de volta no online
+  audio.ts               clique dos menus e o áudio sintetizado da corrida
   network.ts             conexão com o servidor Colyseus
 
 server/src/              servidor autoritativo
@@ -186,5 +222,7 @@ pode reiniciar, e a sala volta pro `waiting` com os mesmos carros, reaproveitand
 - O combustível gasta de verdade, mas o tanque vazio **não tem penalidade nenhuma** ainda: hoje é
   só tensão. Se um dia passar a penalizar, ele precisa virar estado do servidor (ver PROJETO.md).
 - Os bots não usam turbo.
-- Reiniciar no modo solo recarrega a página (mais simples do que resetar todo o estado na mão).
+- Reiniciar no modo solo e no online recarrega a página (mais simples do que resetar todo o estado
+  na mão). No modo local não: "Revanche" e "Menu" descartam a sessão de verdade (`dispose`).
+- O modo local é de teclado/controle — os controles de toque continuam sendo de um jogador só.
 - Os carros são primitivas geométricas, não assets modelados.

@@ -132,14 +132,23 @@ export const ART = {
  * irregularidade é o que faz upscale pixelado parecer sujo, bem mais do que o tamanho do bloco em
  * si. Com fator inteiro todo bloco fica igual e o resultado fica limpo.
  */
-export function applyResolution(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera) {
+export interface RenderSize {
+  /**
+   * Largura/altura NAS UNIDADES DO `setSize` — que são as mesmas do `setViewport`/`setScissor`
+   * (o three.js multiplica as duas pelo `pixelRatio` por dentro). No tema retrô isso é o buffer
+   * pequeno, no moderno é o tamanho da janela em CSS px. Quem divide a tela faz a conta aqui.
+   */
+  width: number;
+  height: number;
+}
+
+export function applyResolution(
+  renderer: THREE.WebGLRenderer,
+  onResize: (size: RenderSize) => void
+) {
   function resize() {
     const w = window.innerWidth;
     const h = window.innerHeight;
-
-    camera.aspect = w / h;
-    camera.fov = ART.camera.fov;
-    camera.updateProjectionMatrix();
 
     const el = renderer.domElement;
     if (VISUAL.internalHeight > 0) {
@@ -154,6 +163,13 @@ export function applyResolution(renderer: THREE.WebGLRenderer, camera: THREE.Per
       renderer.setSize(w, h);
       el.style.imageRendering = "auto";
     }
+
+    // Quem usa as câmeras é que sabe quantas são e quanto da tela cada uma ocupa (tela cheia no
+    // solo, metade no local). Antes esta função mexia direto numa câmera única — era o lugar mais
+    // escondido onde o jogo assumia que só existe um jogador local.
+    const size = new THREE.Vector2();
+    renderer.getSize(size);
+    onResize({ width: size.x, height: size.y });
   }
 
   resize();
