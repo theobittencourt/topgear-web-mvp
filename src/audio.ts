@@ -1,15 +1,49 @@
 /**
- * Som do jogo: o clique dos menus e o motor da corrida.
+ * Som do jogo: o clique dos menus e o áudio da corrida.
  *
  * O clique é um arquivo (`/sound.mp3`); o resto é SINTETIZADO na hora com a Web Audio API, sem
- * nenhum arquivo novo nem dependência nova. Motor de carro arcade é um zumbido cuja altura segue a
- * velocidade — é mais fácil (e muito mais leve) gerar isso com dois osciladores do que gravar,
- * carregar e dar pitch em um sample.
+ * nenhum arquivo novo nem dependência nova — é mais leve do que gravar, carregar e dar pitch num
+ * sample, e o motor precisa variar de altura o tempo todo de qualquer jeito.
+ *
+ * Tudo aqui respeita o liga/desliga de som (`isSoundEnabled`), que fica na tela inicial.
  *
  * Por que importa pro modo local: cada jogador tem o SEU motor, e na divisão lado a lado cada um
  * sai do seu lado da caixa de som (`StereoPannerNode`) — é a única pista sonora de qual metade da
  * tela é a sua.
  */
+
+const SOUND_STORAGE_KEY = "topGearTest.som";
+
+function readStoredSound(): boolean {
+  try {
+    // o padrão é LIGADO: quem desligou de propósito é que fica guardado
+    return localStorage.getItem(SOUND_STORAGE_KEY) !== "off";
+  } catch {
+    // navegador com storage bloqueado (aba anônima, política de cookies)
+    return true;
+  }
+}
+
+let soundEnabled = readStoredSound();
+
+export function isSoundEnabled(): boolean {
+  return soundEnabled;
+}
+
+/**
+ * Liga/desliga TODO o som do jogo (menu, motor e efeitos).
+ *
+ * Vale na hora, inclusive no meio de uma corrida: o motor consulta isto a cada frame em vez de
+ * guardar uma cópia.
+ */
+export function setSoundEnabled(on: boolean) {
+  soundEnabled = on;
+  try {
+    localStorage.setItem(SOUND_STORAGE_KEY, on ? "on" : "off");
+  } catch {
+    // sem storage a escolha só não persiste; o jogo continua funcionando
+  }
+}
 
 /** Cheio soa agressivo demais pra um clique que se repete o tempo todo. */
 const VOLUME_CLIQUE = 0.5;
@@ -40,6 +74,7 @@ function obterAudioDeClique(): HTMLAudioElement {
  * som anterior ainda toca não faria nada, e o menu pareceria estar ignorando o segundo clique.
  */
 export function playMenuClick() {
+  if (!soundEnabled) return;
   const audio = obterAudioDeClique();
   try {
     audio.currentTime = 0;
@@ -113,10 +148,26 @@ export interface EngineSound {
   stop(): void;
 }
 
-const ENGINE_IDLE_HZ = 42;
-const ENGINE_RANGE_HZ = 165;
-/** o turbo sobe o tom do motor — é o que faz o nitro ser audível sem um efeito separado */
-const ENGINE_NITRO_PITCH = 1.22;
+/**
+ * Alturas do motor, em Hz.
+ *
+ * O que separa "motor" de "sirene": a altura NÃO acompanha a velocidade direto. Ela acompanha a
+ * rotação DENTRO DA MARCHA — sobe enquanto o carro acelera naquela marcha e CAI de volta quando
+ * troca. Era isso que faltava na primeira versão, que varria 42→207 Hz numa linha reta e soava
+ * como uma sirene subindo pra sempre.
+ *
+ * As marchas são as mesmas do painel (`gearForSpeed`), então o som troca exatamente quando o
+ * número muda na tela.
+ */
+const ENGINE_GEARS = 6;
+const ENGINE_MIN_HZ = 58;
+const ENGINE_MAX_HZ = 186;
+/** o turbo sobe um pouco o tom, sem virar outro instrumento */
+const ENGINE_NITRO_PITCH = 1.12;
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
 
 export function createEngineSound(options: EngineSoundOptions): EngineSound | null {
   const ctx = getContext();
@@ -125,25 +176,62 @@ export function createEngineSound(options: EngineSoundOptions): EngineSound | nu
   const gain = ctx.createGain();
   gain.gain.value = 0;
 
-  // o filtro corta o agudo do dente-de-serra: sem ele o som fica um zumbido eletrônico fininho,
-  // com ele vira algo mais perto de um motor abafado
+  // Passa-baixa fechado: um dente-de-serra cru é agudo e elétrico demais. Cortando o agudo sobra
+  // o corpo grave, que é o que o ouvido lê como motor. A frequência de corte abre com a rotação —
+  // é o "ronco abrindo" na hora de acelerar.
   const filter = ctx.createBiquadFilter();
   filter.type = "lowpass";
-  filter.frequency.value = 900;
-  filter.Q.value = 0.8;
+  filter.frequency.value = 340;
+  filter.Q.value = 1.1;
   filter.connect(gain);
 
-  // dois osciladores levemente desafinados: um sozinho soa como teste de áudio, dois batendo um
-  // contra o outro dão a trepidação de motor
-  const oscillators = [ctx.createOscillator(), ctx.createOscillator()];
-  oscillators[0].type = "sawtooth";
-  oscillators[1].type = "square";
-  oscillators[1].detune.value = -14;
-  for (const osc of oscillators) {
-    osc.frequency.value = ENGINE_IDLE_HZ;
-    osc.connect(filter);
-    osc.start();
-  }
+  // Dois dentes-de-serra a uma OITAVA de distância, não dois quase na mesma nota. A primeira
+  // versão usava um `square` desafinado em 14 cents contra um `sawtooth`: isso não dá corpo, dá
+  // batimento — aquele "uou-uou-uou" de teste de áudio.
+  const osc = ctx.createOscillator();
+  osc.type = "sawtooth";
+  const sub = ctx.createOscillator();
+  sub.type = "sawtooth";
+  sub.detune.value = -1200; // uma oitava abaixo
+
+  const subGain = ctx.createGain();
+  subGain.gain.value = 0.55;
+  sub.connect(subGain);
+  subGain.connect(filter);
+  osc.connect(filter);
+
+  // Trepidação: um LFO lento mexendo de leve na afinação dos dois. Motor de verdade não segura
+  // uma nota perfeita, e sem isso o som fica "sintetizador" na hora.
+  const wobble = ctx.createOscillator();
+  wobble.type = "sine";
+  wobble.frequency.value = 6.5;
+  const wobbleDepth = ctx.createGain();
+  wobbleDepth.gain.value = 7; // em cents
+  wobble.connect(wobbleDepth);
+  wobbleDepth.connect(osc.detune);
+  wobbleDepth.connect(sub.detune);
+
+  // Um fiapo de ruído filtrado por cima: é o "ar" da admissão. Sozinho não é nada, mas tira o
+  // resto da cara de oscilador puro.
+  const air = ctx.createBufferSource();
+  air.buffer = getNoiseBuffer(ctx);
+  air.loop = true;
+  const airFilter = ctx.createBiquadFilter();
+  airFilter.type = "bandpass";
+  airFilter.frequency.value = 480;
+  airFilter.Q.value = 0.9;
+  const airGain = ctx.createGain();
+  airGain.gain.value = 0;
+  air.connect(airFilter);
+  airFilter.connect(airGain);
+  airGain.connect(gain);
+
+  osc.frequency.value = ENGINE_MIN_HZ;
+  sub.frequency.value = ENGINE_MIN_HZ;
+  osc.start();
+  sub.start();
+  wobble.start();
+  air.start();
 
   const extras = connectToOutput(ctx, gain, options.pan);
 
@@ -153,33 +241,55 @@ export function createEngineSound(options: EngineSoundOptions): EngineSound | nu
   return {
     update(speed01, nitro) {
       if (stopped) return;
-      const speed = Math.max(0, Math.min(1, speed01));
-      const pitch = (ENGINE_IDLE_HZ + speed * ENGINE_RANGE_HZ) * (nitro ? ENGINE_NITRO_PITCH : 1);
+      const speed = clamp01(speed01);
+
+      // rotação dentro da marcha atual: 0 = acabou de trocar, 1 = esticando no talo
+      const porMarcha = Math.min(speed * ENGINE_GEARS, ENGINE_GEARS - 0.0001);
+      const rpm = porMarcha - Math.floor(porMarcha);
+
+      const pitch = (ENGINE_MIN_HZ + rpm * (ENGINE_MAX_HZ - ENGINE_MIN_HZ)) * (nitro ? ENGINE_NITRO_PITCH : 1);
       const now = ctx.currentTime;
 
-      for (const osc of oscillators) {
-        // rampa curta em vez de atribuição seca: trocar a frequência de um oscilador de um frame
-        // pro outro estala (é uma descontinuidade na onda)
-        osc.frequency.setTargetAtTime(pitch, now, 0.05);
-      }
-      filter.frequency.setTargetAtTime(700 + speed * 1800, now, 0.08);
+      // rampa curta em vez de atribuição seca: trocar a frequência de um oscilador de um frame
+      // pro outro estala (é uma descontinuidade na onda). Ela também é o que faz a troca de
+      // marcha soar como uma troca, e não como um corte.
+      osc.frequency.setTargetAtTime(pitch, now, 0.04);
+      sub.frequency.setTargetAtTime(pitch, now, 0.04);
+      filter.frequency.setTargetAtTime(320 + rpm * 900 + speed * 700, now, 0.06);
+      airFilter.frequency.setTargetAtTime(380 + speed * 900, now, 0.08);
 
-      const target = muted ? 0 : options.volume * (0.045 + speed * 0.1);
-      gain.gain.setTargetAtTime(target, now, 0.05);
+      const silenciado = muted || !isSoundEnabled();
+      // o volume sobe com a velocidade (o carro ao longe é mais baixo que o carro voando), e um
+      // tiquinho com a rotação, que é o que dá o "esforço" no fim de cada marcha
+      gain.gain.setTargetAtTime(
+        silenciado ? 0 : options.volume * (0.022 + speed * 0.05 + rpm * 0.016),
+        now,
+        0.06
+      );
+      airGain.gain.setTargetAtTime(silenciado ? 0 : options.volume * (0.012 + speed * 0.03), now, 0.08);
     },
     setMuted(value) {
       muted = value;
-      if (!stopped) gain.gain.setTargetAtTime(muted ? 0 : options.volume * 0.05, ctx.currentTime, 0.05);
+      if (stopped || !muted) return;
+      // silenciar precisa valer na hora: depois da bandeirada o `update` para de ser chamado, e
+      // sem isto o motor ficaria roncando por cima da tela de classificação
+      gain.gain.setTargetAtTime(0, ctx.currentTime, 0.05);
+      airGain.gain.setTargetAtTime(0, ctx.currentTime, 0.05);
     },
     stop() {
       if (stopped) return;
       stopped = true;
-      gain.gain.cancelScheduledValues(ctx.currentTime);
-      gain.gain.setTargetAtTime(0, ctx.currentTime, 0.02);
-      for (const osc of oscillators) {
-        osc.stop(ctx.currentTime + 0.1);
-        osc.disconnect();
+      const now = ctx.currentTime;
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setTargetAtTime(0, now, 0.02);
+      for (const node of [osc, sub, wobble, air]) {
+        node.stop(now + 0.1);
+        node.disconnect();
       }
+      wobbleDepth.disconnect();
+      subGain.disconnect();
+      airFilter.disconnect();
+      airGain.disconnect();
       filter.disconnect();
       gain.disconnect();
       for (const node of extras) node.disconnect();
@@ -205,6 +315,7 @@ function getNoiseBuffer(ctx: AudioContext): AudioBuffer {
  * carros. Toca na panorâmica de quem bateu.
  */
 export function playCrash(pan: number, strength: number) {
+  if (!soundEnabled) return;
   const ctx = getContext();
   if (!ctx) return;
 
@@ -242,6 +353,7 @@ export function playCrash(pan: number, strength: number) {
 
 /** Turbo: varredura de ruído subindo, na panorâmica de quem apertou. */
 export function playNitroWhoosh(pan: number) {
+  if (!soundEnabled) return;
   const ctx = getContext();
   if (!ctx) return;
 

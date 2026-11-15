@@ -1,5 +1,5 @@
 import { getTheme, setTheme } from "./retro";
-import { playMenuClick } from "./audio";
+import { playMenuClick, isSoundEnabled, setSoundEnabled } from "./audio";
 import { formatTime } from "./raceTimer";
 import type { VisualTheme } from "./retro";
 
@@ -1019,6 +1019,7 @@ export function createModeSelectScreen(
   }
 
   el.appendChild(createThemePicker());
+  el.appendChild(createSoundPicker());
   document.body.appendChild(comSomDeMenu(el));
 
   // a tela inicial não tem "voltar": ela É o começo do fluxo. O handle existe pra que as telas
@@ -1089,6 +1090,65 @@ function createThemePicker(): HTMLElement {
   }
 
   wrap.appendChild(dica);
+  pintar();
+  return wrap;
+}
+
+/**
+ * Liga/desliga o som, na tela inicial.
+ *
+ * Diferente do tema visual, aqui NÃO recarrega a página: o som é consultado a cada frame, então a
+ * troca vale na hora. Ligar toca o clique de propósito — é a confirmação de que voltou.
+ */
+function createSoundPicker(): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.style.cssText =
+    "margin-top: 18px; display: flex; flex-direction: column; align-items: center; gap: 8px;";
+
+  const label = document.createElement("div");
+  label.style.cssText = `
+    font-size: 12px; letter-spacing: 2px; color: ${MENU.prata}; text-transform: uppercase;
+  `;
+  label.textContent = "Som";
+  wrap.appendChild(label);
+
+  const row = document.createElement("div");
+  row.style.cssText = "display: flex; gap: 10px;";
+  wrap.appendChild(row);
+
+  const opcoes: { on: boolean; label: string }[] = [
+    { on: true, label: "Ligado" },
+    { on: false, label: "Desligado" },
+  ];
+
+  const botoes: HTMLButtonElement[] = [];
+  function pintar() {
+    const atual = isSoundEnabled();
+    opcoes.forEach((opt, i) => {
+      const ativo = opt.on === atual;
+      botoes[i].style.background = ativo ? MENU.vermelho : MENU.grafite;
+      botoes[i].style.color = ativo ? "#fff" : MENU.apagado;
+    });
+  }
+
+  for (const opt of opcoes) {
+    const button = document.createElement("button");
+    button.textContent = opt.label;
+    button.style.cssText = `
+      font-family: ${RETRO_FONT}; font-size: 13px; font-weight: 700; letter-spacing: 1px;
+      text-transform: uppercase; padding: 8px 20px; border: 3px solid #fff;
+      box-shadow: 3px 3px 0 #000; cursor: pointer;
+    `;
+    button.addEventListener("click", () => {
+      if (isSoundEnabled() === opt.on) return;
+      setSoundEnabled(opt.on);
+      if (opt.on) playMenuClick();
+      pintar();
+    });
+    botoes.push(button);
+    row.appendChild(button);
+  }
+
   pintar();
   return wrap;
 }
